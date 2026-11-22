@@ -1,8 +1,11 @@
+import { clientError, MailError, type ClientErrorCode } from '../errors.js';
 import { decodeCursor, encodeCursor } from '../ids.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
 
 export interface AccountError {
   account: string;
+  code: ClientErrorCode;
+  /** Client-safe: a MailError message, otherwise the generic internal error text. */
   message: string;
 }
 
@@ -38,9 +41,8 @@ export async function searchAccounts(
       totals.set(id, outcome.value.total);
       candidates.push(...outcome.value.messages);
     } else {
-      const reason: Error | undefined =
-        outcome.reason instanceof Error ? outcome.reason : undefined;
-      errors.push({ account: id, message: reason?.message ?? 'unknown error' });
+      const reason = outcome.reason instanceof MailError ? outcome.reason : undefined;
+      errors.push({ account: id, ...clientError(reason) });
     }
   });
 

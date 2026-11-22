@@ -19,3 +19,20 @@ export class MailError extends Error {
     this.code = code;
   }
 }
+
+/** Shown instead of the message of any error that is not a MailError. */
+export const INTERNAL_ERROR_MESSAGE = 'Internal error while talking to the mail server.';
+
+export type ClientErrorCode = MailErrorCode | 'internal';
+
+export interface ClientError {
+  code: ClientErrorCode;
+  message: string;
+}
+
+/** What a client may see of a failure: a MailError as written, anything else as a generic internal error. */
+export function clientError(err: MailError | undefined): ClientError {
+  return err === undefined
+    ? { code: 'internal', message: INTERNAL_ERROR_MESSAGE }
+    : { code: err.code, message: err.message };
+}

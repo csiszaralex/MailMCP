@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { searchAccounts } from '../../src/aggregate/search.js';
+import { INTERNAL_ERROR_MESSAGE, MailError } from '../../src/errors.js';
 import { decodeCursor } from '../../src/ids.js';
 import type { MailProvider, MessageSummary, SearchPage } from '../../src/mail/types.js';
 import type { Account } from '../../src/config/types.js';
@@ -28,10 +29,10 @@ function provider(id: string, messages: MessageSummary[]): MailProvider {
   } as Partial<MailProvider> as MailProvider;
 }
 
-function failing(id: string): MailProvider {
+function failing(id: string, error: Error): MailProvider {
   return {
     account: { id } as Account,
-    search: () => Promise.reject(new Error('IMAP connection failed')),
+    search: () => Promise.reject(error),
   } as Partial<MailProvider> as MailProvider;
 }
 
@@ -58,9 +59,24 @@ describe('searchAccounts', () => {
   });
 
   it('reports a failing account and still returns the others', async () => {
-    const result = await searchAccounts([A, failing('c')], '', 10, undefined);
+    const result = await searchAccounts(
+      [A, failing('c', new Error('IMAP connection failed'))],
+      '',
+      10,
+      undefined,
+    );
     expect(result.messages).toHaveLength(3);
-    expect(result.errors).toEqual([{ account: 'c', message: 'IMAP connection failed' }]);
+    expect(result.errors).toEqual([
+      { account: 'c', code: 'internal', message: INTERNAL_ERROR_MESSAGE },
+    ]);
     expect(result.nextPageToken).toBeNull();
+  });
+
+  it('passes a MailError code and message through', async () => {
+    const error = new MailError('unsupported_query', 'X is only supported on Gmail accounts');
+    const result = await searchAccounts([A, failing('c', error)], '', 10, undefined);
+    expect(result.errors).toEqual([
+      { account: 'c', code: 'unsupported_query', message: 'X is only supported on Gmail accounts' },
+    ]);
   });
 });
