@@ -7,8 +7,21 @@ import type { ImapClient } from '../imap/client.js';
 import { resolveMailbox } from '../imap/mailboxes.js';
 import type { ImapPool } from '../imap/pool.js';
 import { translateQuery } from '../search/query.js';
-import { renderBody } from './body.js';
-import { collectAttachments, messageDate, threadRootId, toAddresses } from './message-parts.js';
+import {
+  assertRawSize,
+  rawBody,
+  RAW_LIMIT_BYTES,
+  renderText,
+  TEXT_PART_LIMIT_BYTES,
+  type TextPart,
+} from './body.js';
+import {
+  collectAttachments,
+  messageDate,
+  textParts,
+  threadRootId,
+  toAddresses,
+} from './message-parts.js';
 import type {
   AttachmentContent,
   BodyFormat,
@@ -62,8 +75,7 @@ export class ImapMailProvider implements MailProvider {
           );
         }
         const [detail] = await this.#details(client, ref.mailbox, uidValidity, [ref.uid], format);
-        if (detail === undefined)
-          throw new MailError('not_found', 'Message not found; it may have been moved or deleted.');
+        if (detail === undefined) throw messageGone();
         return detail;
       }),
     );
@@ -244,31 +256,58 @@ export class ImapMailProvider implements MailProvider {
     format: BodyFormat,
   ): Promise<MessageDetail[]> {
     if (uids.length === 0) return [];
-    const query: FetchQueryObject = {
-      ...this.#summaryQuery(),
-      bodyStructure: true,
-      source: format !== 'metadata',
-    };
+    // Metadata only: bodies are fetched below one message at a time, never as full sources.
+    const query: FetchQueryObject = { ...this.#summaryQuery(), bodyStructure: true, size: true };
     const fetched = await client.fetchAll(uids.join(','), query, { uid: true });
     const byUid = new Map(fetched.map((msg) => [msg.uid, msg]));
     const details: MessageDetail[] = [];
     for (const uid of uids) {
       const msg = byUid.get(uid);
       if (msg === undefined) continue;
-      const body =
-        format === 'metadata' || msg.source === undefined
-          ? null
-          : await renderBody(msg.source, format);
       details.push({
         ...this.#summary(path, uidValidity, msg),
         messageIdHeader: msg.envelope?.messageId ?? null,
         inReplyTo: msg.envelope?.inReplyTo ?? null,
         attachments: collectAttachments(msg.bodyStructure),
         format,
-        body,
+        body: format === 'metadata' ? null : await this.#body(client, msg, format),
       });
     }
     return details;
+  }
+
+  async #body(
+    client: ImapClient,
+    msg: FetchMessageObject,
+    format: 'plain' | 'html' | 'raw',
+  ): Promise<string> {
+    if (format === 'raw') {
+      assertRawSize(msg.size ?? 0);
+      const full = await client.fetchOne(
+        String(msg.uid),
+        { uid: true, source: { maxLength: RAW_LIMIT_BYTES + 1 } },
+        { uid: true },
+      );
+      if (full === false || full.source === undefined) throw messageGone();
+      return rawBody(full.source);
+    }
+    const parts: TextPart[] = [];
+    for (const ref of textParts(msg.bodyStructure, format)) {
+      const download = await client.download(String(msg.uid), ref.part, {
+        uid: true,
+        maxBytes: TEXT_PART_LIMIT_BYTES + 1,
+      });
+      if (download.content === undefined) continue;
+      const data = await buffer(download.content);
+      const cut = data.length > TEXT_PART_LIMIT_BYTES;
+      parts.push({
+        type: ref.type,
+        charset: download.meta.charset,
+        content: cut ? data.subarray(0, TEXT_PART_LIMIT_BYTES) : data,
+        cut,
+      });
+    }
+    return renderText(parts, format);
   }
 
   #summary(path: string, uidValidity: string, msg: FetchMessageObject): MessageSummary {
@@ -303,6 +342,10 @@ export class ImapMailProvider implements MailProvider {
       rootMessageId: root,
     });
   }
+}
+
+function messageGone(): MailError {
+  return new MailError('not_found', 'Message not found; it may have been moved or deleted.');
 }
 
 function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {

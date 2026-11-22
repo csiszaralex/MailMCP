@@ -87,6 +87,14 @@ describe('getMessage', () => {
     expect(await subjects('is:unread')).toEqual(['Lunch?']);
   });
 
+  it('returns the raw source', async () => {
+    const [lunch] = (await provider.search('is:unread', 0, 1)).messages;
+    if (lunch === undefined) throw new Error('seed missing');
+    const detail = await provider.getMessage(decodeMessageId(lunch.id), 'raw');
+    expect(detail.body).toContain('Subject: Lunch?');
+    expect(detail.body).toContain('<p>Lunch at <b>noon</b>?</p>');
+  });
+
   it('returns metadata without a body', async () => {
     const [first] = (await provider.search('', 0, 1)).messages;
     if (first === undefined) throw new Error('seed missing');

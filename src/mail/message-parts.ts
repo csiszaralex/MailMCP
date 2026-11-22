@@ -48,3 +48,37 @@ export function threadRootId(
   const first = references === undefined ? undefined : /<[^<>\s]+>/.exec(references)?.[0];
   return first ?? ownMessageId;
 }
+
+export type TextType = 'text/plain' | 'text/html';
+
+export interface TextPartRef {
+  /** IMAP body part number; "1" for a single-part message. */
+  part: string;
+  type: TextType;
+}
+
+function inlineTextLeaves(structure: MessageStructureObject): TextPartRef[] {
+  if (structure.childNodes !== undefined && structure.childNodes.length > 0) {
+    // An attached message/rfc822 has its own body: its text is not part of this mail's body.
+    if (structure.type === 'message/rfc822') return [];
+    return structure.childNodes.flatMap((child) => inlineTextLeaves(child));
+  }
+  if (structure.disposition === 'attachment') return [];
+  if (structure.type !== 'text/plain' && structure.type !== 'text/html') return [];
+  return [{ part: structure.part ?? '1', type: structure.type }];
+}
+
+/**
+ * The body parts to download for a format: the parts of the preferred type, else those of
+ * the other text type (mailparser then converts between html and text).
+ */
+export function textParts(
+  structure: MessageStructureObject | undefined,
+  format: 'plain' | 'html',
+): TextPartRef[] {
+  if (structure === undefined) return [];
+  const leaves = inlineTextLeaves(structure);
+  const preferred: TextType = format === 'plain' ? 'text/plain' : 'text/html';
+  const own = leaves.filter((leaf) => leaf.type === preferred);
+  return own.length > 0 ? own : leaves.filter((leaf) => leaf.type !== preferred);
+}

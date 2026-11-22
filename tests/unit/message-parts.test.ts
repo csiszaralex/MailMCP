@@ -3,6 +3,7 @@ import type { FetchMessageObject, MessageStructureObject } from 'imapflow';
 import {
   collectAttachments,
   messageDate,
+  textParts,
   threadRootId,
   toAddresses,
 } from '../../src/mail/message-parts.js';
@@ -70,5 +71,38 @@ describe('threadRootId', () => {
   it('falls back to the own Message-ID', () => {
     expect(threadRootId(Buffer.from('\r\n'), '<own@x.org>')).toBe('<own@x.org>');
     expect(threadRootId(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe('textParts', () => {
+  const alternative: MessageStructureObject = {
+    type: 'multipart/mixed',
+    childNodes: [
+      {
+        part: '1',
+        type: 'multipart/alternative',
+        childNodes: [
+          { part: '1.1', type: 'text/plain' },
+          { part: '1.2', type: 'text/html' },
+        ],
+      },
+      { part: '2', type: 'text/plain', disposition: 'attachment' },
+      {
+        part: '3',
+        type: 'message/rfc822',
+        childNodes: [{ part: '3.1', type: 'text/plain' }],
+      },
+    ],
+  };
+
+  it('picks the inline parts of the requested type', () => {
+    expect(textParts(alternative, 'plain')).toEqual([{ part: '1.1', type: 'text/plain' }]);
+    expect(textParts(alternative, 'html')).toEqual([{ part: '1.2', type: 'text/html' }]);
+  });
+
+  it('falls back to the other text type', () => {
+    const htmlOnly: MessageStructureObject = { type: 'text/html' };
+    expect(textParts(htmlOnly, 'plain')).toEqual([{ part: '1', type: 'text/html' }]);
+    expect(textParts(undefined, 'plain')).toEqual([]);
   });
 });
