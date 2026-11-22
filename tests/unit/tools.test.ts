@@ -5,6 +5,7 @@ import type { Account } from '../../src/config/types.js';
 import type { LogRecord } from '../../src/log.js';
 import type { MailProvider, MessageDetail, MessageSummary } from '../../src/mail/types.js';
 import { encodeMessageId, encodeThreadId } from '../../src/ids.js';
+import { UNTRUSTED_NOTE } from '../../src/tools/result.js';
 
 function account(id: string): Account {
   return { id, address: `${id}@example.org`, provider: 'imap', level: 'read' } as Account;
@@ -108,10 +109,12 @@ describe('tool list', () => {
     expect(Object.keys(searchScoped?.inputSchema.properties ?? {})).not.toContain('account');
   });
 
-  it('warns that mail content is untrusted', async () => {
-    const client = await connect();
-    const getMessage = (await client.listTools()).tools.find((t) => t.name === 'get_message');
-    expect(getMessage?.description).toContain('untrusted');
+  it('warns in every tool description that mail content is untrusted', async () => {
+    for (const client of [await connect(), await connect('a')]) {
+      const tools = (await client.listTools()).tools;
+      expect(tools).toHaveLength(8);
+      for (const tool of tools) expect(tool.description, tool.name).toContain(UNTRUSTED_NOTE);
+    }
   });
 });
 

@@ -92,7 +92,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     'list_accounts',
     {
       title: 'List mail accounts',
-      description: 'Lists the mail accounts available on this endpoint with their access level.',
+      description: `Lists the mail accounts available on this endpoint with their access level. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({}),
       annotations: READ_ONLY,
     },
@@ -233,8 +233,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
   // list_labels and list_drafts need one account
   const labelsMeta = {
     title: 'List labels and folders',
-    description:
-      'Lists Gmail labels or IMAP folders, with special-use flags such as \\Sent or \\Trash.',
+    description: `Lists Gmail labels or IMAP folders, with special-use flags such as \\Sent or \\Trash. ${UNTRUSTED_NOTE}`,
     annotations: READ_ONLY,
   };
   const handleLabels = (args: { account?: string | undefined }) =>
