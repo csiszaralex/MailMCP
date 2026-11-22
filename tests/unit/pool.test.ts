@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_BACKOFF_MS, ImapPool } from '../../src/imap/pool.js';
-import type { ImapClient } from '../../src/imap/client.js';
+import { IDLE_CLOSE_MS, type ImapClient } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
 import { MailError } from '../../src/errors.js';
 import type { ConnectionErrorRecord } from '../../src/log.js';
@@ -81,6 +81,16 @@ describe('ImapPool', () => {
     expect(fakes[0]?.logouts).toBe(1);
     await pool.use(ACCOUNT, () => Promise.resolve());
     expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('closes idle connections after IDLE_CLOSE_MS by default', async () => {
+    const fake = fakeClient();
+    const pool = new ImapPool(() => Promise.resolve(fake.client));
+    await pool.use(ACCOUNT, () => Promise.resolve());
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS - 1);
+    expect(fake.logouts).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.logouts).toBe(1);
   });
 
   it('does not close while a call is still running', async () => {

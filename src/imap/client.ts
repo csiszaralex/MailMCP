@@ -49,8 +49,14 @@ export type ImapClientFactory = (account: Account) => Promise<ImapClient>;
 
 /** Budget for TCP, TLS and the greeting of a new connection. */
 export const CONNECTION_TIMEOUT_MS = 15_000;
-/** A server silent this long in the middle of a command is treated as stalled (imapflow default: 5 min). */
-export const SOCKET_TIMEOUT_MS = 60_000;
+/** The pool logs out a connection after this long without use. */
+export const IDLE_CLOSE_MS = 60_000;
+/**
+ * A server silent this long is treated as stalled (imapflow default: 5 min). It must stay above
+ * IDLE_CLOSE_MS: imapflow also counts an idle connection's silence, and a timeout first would
+ * break every idle connection with ETIMEOUT instead of the pool's clean logout.
+ */
+export const SOCKET_TIMEOUT_MS = 2 * IDLE_CLOSE_MS;
 
 /** TLS is mandatory and certificate checks cannot be turned off (spec: "Levelezőszerverek felé"). */
 export function imapConnectionOptions(account: Account, password: string): ImapFlowOptions {

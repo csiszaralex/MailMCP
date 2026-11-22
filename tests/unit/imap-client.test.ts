@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { imapConnectionOptions, SOCKET_TIMEOUT_MS } from '../../src/imap/client.js';
+import { IDLE_CLOSE_MS, imapConnectionOptions, SOCKET_TIMEOUT_MS } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
 
 function account(port: number): Account {
@@ -33,6 +33,10 @@ describe('imapConnectionOptions', () => {
   it('gives up on a silent server instead of waiting five minutes', () => {
     expect(imapConnectionOptions(account(993), 'secret').socketTimeout).toBe(SOCKET_TIMEOUT_MS);
     expect(SOCKET_TIMEOUT_MS).toBeLessThan(5 * 60_000);
+  });
+
+  it('keeps the socket timeout above the idle close, so idle connections log out cleanly', () => {
+    expect(SOCKET_TIMEOUT_MS).toBeGreaterThan(IDLE_CLOSE_MS);
   });
 
   it('requires STARTTLS on any other port', () => {

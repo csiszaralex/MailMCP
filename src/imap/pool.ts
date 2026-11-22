@@ -1,7 +1,7 @@
 import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import { errorClass, stderrConnectionLogger, type ConnectionLogger } from '../log.js';
-import type { ImapClient, ImapClientFactory } from './client.js';
+import { IDLE_CLOSE_MS, type ImapClient, type ImapClientFactory } from './client.js';
 
 /**
  * After the server rejected a login, new connects for that account are refused for this long:
@@ -64,7 +64,7 @@ export class ImapPool {
 
   constructor(
     private readonly connect: ImapClientFactory,
-    private readonly idleMs = 60_000,
+    private readonly idleMs = IDLE_CLOSE_MS,
     private readonly logError: ConnectionLogger = stderrConnectionLogger,
   ) {}
 
