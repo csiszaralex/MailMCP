@@ -4,7 +4,7 @@ import { searchAccounts } from '../aggregate/search.js';
 import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../ids.js';
-import type { Logger } from '../log.js';
+import type { Logger, LogTarget } from '../log.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
 import { jsonResult, runTool, UNTRUSTED_NOTE } from './result.js';
 
@@ -39,6 +39,27 @@ function shape(message: MessageSummary, view: View): object {
   return message;
 }
 
+const NO_TARGET: LogTarget = { account: null, id: null };
+
+/** Log label of a message id: its account and the opaque id; nothing for an invalid id. */
+function messageTarget(messageId: string): LogTarget {
+  try {
+    return { account: decodeMessageId(messageId).account, id: messageId };
+  } catch {
+    return NO_TARGET;
+  }
+}
+
+/** Log label of a thread id; a references thread id embeds a Message-ID header, so only its account. */
+function threadTarget(threadId: string): LogTarget {
+  try {
+    const ref = decodeThreadId(threadId);
+    return { account: ref.account, id: ref.kind === 'gmail' ? threadId : null };
+  } catch {
+    return NO_TARGET;
+  }
+}
+
 export function registerReadTools(server: McpServer, scope: ToolScope, deps: ToolDeps): void {
   const scoped = scope.scopedAccountId !== undefined;
   const inScope = (accountId: string): Account => {
@@ -60,8 +81,12 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     if (id === null) throw new MailError('unknown_account', 'The account parameter is required.');
     return id;
   };
-  const run = (tool: string, account: string | null, fn: () => Promise<CallToolResult>) =>
-    runTool(deps.log, tool, account, fn);
+  const run = (tool: string, target: LogTarget, fn: () => Promise<CallToolResult>) =>
+    runTool(deps.log, tool, target, fn);
+  const accountTarget = (requested: string | undefined): LogTarget => ({
+    account: requestedAccount(requested),
+    id: null,
+  });
 
   server.registerTool(
     'list_accounts',
@@ -72,7 +97,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       annotations: READ_ONLY,
     },
     () =>
-      run('list_accounts', null, () =>
+      run('list_accounts', NO_TARGET, () =>
         Promise.resolve(
           jsonResult(
             scope.accounts.map((a) => ({
@@ -110,7 +135,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     view: View;
     account?: string | undefined;
   }) =>
-    run('search', requestedAccount(args.account), async () => {
+    run('search', accountTarget(args.account), async () => {
       const ids =
         args.account !== undefined || scoped
           ? [onlyAccount(args.account)]
@@ -156,7 +181,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       annotations: READ_ONLY,
     },
     (args) =>
-      run('get_message', null, async () => {
+      run('get_message', messageTarget(args.messageId), async () => {
         const ref = decodeMessageId(args.messageId);
         return jsonResult(await providerOf(ref.account).getMessage(ref, args.format));
       }),
@@ -171,7 +196,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       annotations: READ_ONLY,
     },
     (args) =>
-      run('get_thread', null, async () => {
+      run('get_thread', threadTarget(args.threadId), async () => {
         const ref = decodeThreadId(args.threadId);
         return jsonResult({ messages: await providerOf(ref.account).getThread(ref, args.format) });
       }),
@@ -186,7 +211,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       annotations: READ_ONLY,
     },
     (args) =>
-      run('download_attachment', null, async () => {
+      run('download_attachment', messageTarget(args.messageId), async () => {
         const ref = decodeMessageId(args.messageId);
         const file = await providerOf(ref.account).downloadAttachment(ref, args.attachmentId);
         return {
@@ -213,7 +238,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     annotations: READ_ONLY,
   };
   const handleLabels = (args: { account?: string | undefined }) =>
-    run('list_labels', requestedAccount(args.account), async () =>
+    run('list_labels', accountTarget(args.account), async () =>
       jsonResult(await providerOf(onlyAccount(args.account)).listLabels()),
     );
 
@@ -231,7 +256,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     pageToken?: string | undefined;
     account?: string | undefined;
   }) =>
-    run('list_drafts', requestedAccount(args.account), async () => {
+    run('list_drafts', accountTarget(args.account), async () => {
       const id = onlyAccount(args.account);
       const offset = args.pageToken === undefined ? 0 : (decodeCursor(args.pageToken)[id] ?? 0);
       const page = await providerOf(id).listDrafts(offset, args.pageSize);
@@ -272,7 +297,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       annotations: READ_ONLY,
     },
     (args) =>
-      run('get_draft', null, async () => {
+      run('get_draft', messageTarget(args.draftId), async () => {
         const ref = decodeMessageId(args.draftId);
         return jsonResult(await providerOf(ref.account).getMessage(ref, args.format));
       }),

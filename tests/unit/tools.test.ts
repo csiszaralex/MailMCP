@@ -4,7 +4,7 @@ import { buildMcpServer, type ToolDeps } from '../../src/server.js';
 import type { Account } from '../../src/config/types.js';
 import type { LogRecord } from '../../src/log.js';
 import type { MailProvider, MessageDetail, MessageSummary } from '../../src/mail/types.js';
-import { encodeMessageId } from '../../src/ids.js';
+import { encodeMessageId, encodeThreadId } from '../../src/ids.js';
 
 function account(id: string): Account {
   return { id, address: `${id}@example.org`, provider: 'imap', level: 'read' } as Account;
@@ -152,6 +152,45 @@ describe('tool calls', () => {
       outcome: 'error',
       code: 'unknown_account',
     });
+  });
+
+  it('logs the message id and its account for id-based tools', async () => {
+    const client = await connect();
+    const id = encodeMessageId({ account: 'b', mailbox: 'INBOX', uidValidity: '1', uid: 7 });
+    await client.callTool({ name: 'get_message', arguments: { messageId: id } });
+    await client.callTool({ name: 'get_draft', arguments: { draftId: id } });
+    await client.callTool({
+      name: 'download_attachment',
+      arguments: { messageId: id, attachmentId: '2' },
+    });
+    expect(logs.map((l) => [l.tool, l.account, l.id])).toEqual([
+      ['get_message', 'b', id],
+      ['get_draft', 'b', id],
+      ['download_attachment', 'b', id],
+    ]);
+  });
+
+  it('logs Gmail thread ids but not thread ids that embed a Message-ID', async () => {
+    const client = await connect();
+    const gmail = encodeThreadId({ kind: 'gmail', account: 'a', gmailThreadId: '17900' });
+    const refs = encodeThreadId({
+      kind: 'references',
+      account: 'b',
+      mailbox: 'INBOX',
+      rootMessageId: '<root@example.org>',
+    });
+    await client.callTool({ name: 'get_thread', arguments: { threadId: gmail } });
+    await client.callTool({ name: 'get_thread', arguments: { threadId: refs } });
+    expect(logs.map((l) => [l.account, l.id])).toEqual([
+      ['a', gmail],
+      ['b', null],
+    ]);
+  });
+
+  it('logs no id for an invalid id', async () => {
+    const client = await connect();
+    await client.callTool({ name: 'get_message', arguments: { messageId: 'nope!' } });
+    expect(logs[0]).toMatchObject({ tool: 'get_message', account: null, id: null });
   });
 
   it('reports invalid ids as tool errors', async () => {
