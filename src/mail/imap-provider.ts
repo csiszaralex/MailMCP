@@ -70,12 +70,7 @@ export class ImapMailProvider implements MailProvider {
     this.#assertOwn(ref.account);
     return this.pool.use(this.account, (client) =>
       this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
-        if (uidValidity !== ref.uidValidity) {
-          throw new MailError(
-            'stale_id',
-            'This message id is outdated (the mailbox was rebuilt); search again.',
-          );
-        }
+        assertCurrent(ref, uidValidity);
         const [detail] = await this.#details(client, ref.mailbox, uidValidity, [ref.uid], format);
         if (detail === undefined) throw messageGone();
         return detail;
@@ -128,9 +123,7 @@ export class ImapMailProvider implements MailProvider {
     this.#assertOwn(ref.account);
     return this.pool.use(this.account, (client) =>
       this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
-        if (uidValidity !== ref.uidValidity) {
-          throw new MailError('stale_id', 'This message id is outdated; search again.');
-        }
+        assertCurrent(ref, uidValidity);
         const msg = await client.fetchOne(
           String(ref.uid),
           { uid: true, bodyStructure: true },
@@ -366,6 +359,16 @@ export class ImapMailProvider implements MailProvider {
       mailbox: path,
       rootMessageId: root,
     });
+  }
+}
+
+/** A message id names a UID under one UIDVALIDITY; after the server rebuilt the mailbox it is void. */
+function assertCurrent(ref: MessageRef, uidValidity: string): void {
+  if (uidValidity !== ref.uidValidity) {
+    throw new MailError(
+      'stale_id',
+      'This message id is outdated (the mailbox was rebuilt); search again.',
+    );
   }
 }
 

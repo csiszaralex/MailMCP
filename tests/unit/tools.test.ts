@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client, InMemoryTransport, type CallToolResult } from '@modelcontextprotocol/client';
 import { buildMcpServer, type ToolDeps } from '../../src/server.js';
@@ -6,6 +7,10 @@ import type { LogRecord } from '../../src/log.js';
 import type { MailProvider, MessageDetail, MessageSummary } from '../../src/mail/types.js';
 import { encodeMessageId, encodeThreadId } from '../../src/ids.js';
 import { UNTRUSTED_NOTE } from '../../src/tools/result.js';
+import { PAGE_SIZE_LIMIT } from '../../src/tools/read-tools.js';
+import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../../src/mail/imap-provider.js';
+import { SERVER_INFO } from '../../src/server.js';
+import { parseJsonText } from '../../src/boundary.js';
 
 function account(id: string): Account {
   return { id, address: `${id}@example.org`, provider: 'imap', level: 'read' } as Account;
@@ -98,6 +103,25 @@ describe('tool list', () => {
       'list_labels',
       'search',
     ]);
+  });
+
+  it('states the limits the code enforces', async () => {
+    const tools = (await (await connect()).listTools()).tools;
+    const describe = (name: string): string =>
+      tools.find((t) => t.name === name)?.description ?? '';
+    expect(describe('download_attachment')).toContain(
+      `max ${String(ATTACHMENT_LIMIT_BYTES / (1024 * 1024))} MB`,
+    );
+    expect(describe('get_thread')).toContain(`newest ${String(THREAD_MESSAGE_LIMIT)}`);
+    for (const name of ['search', 'list_drafts']) {
+      const schema = tools.find((t) => t.name === name)?.inputSchema;
+      expect(schema?.properties?.pageSize, name).toMatchObject({ maximum: PAGE_SIZE_LIMIT });
+    }
+  });
+
+  it('reports the version from package.json', () => {
+    const pkg = parseJsonText(readFileSync('package.json', 'utf8'));
+    expect(pkg).toMatchObject({ name: SERVER_INFO.name, version: SERVER_INFO.version });
   });
 
   it('exposes the account parameter only without a scope', async () => {

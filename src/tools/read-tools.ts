@@ -5,6 +5,7 @@ import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../ids.js';
 import type { Logger, LogTarget } from '../log.js';
+import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../mail/imap-provider.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
 import { jsonResult, runTool, UNTRUSTED_NOTE } from './result.js';
 
@@ -20,6 +21,9 @@ export interface ToolDeps {
 }
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true } as const;
+/** Most messages per page of search and list_drafts (spec: at most 50 per page). */
+export const PAGE_SIZE_LIMIT = 50;
+const pageSizeSchema = z.int().min(1).max(PAGE_SIZE_LIMIT).default(20);
 const viewSchema = z.enum(['ids', 'metadata', 'minimal']).default('minimal');
 const formatSchema = z.enum(['metadata', 'plain', 'html', 'raw']).default('plain');
 type View = z.infer<typeof viewSchema>;
@@ -119,7 +123,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       .describe(
         'Gmail search syntax. Gmail accounts support all operators. Other accounts support from:, to:, cc:, subject:, after:YYYY/MM/DD, before:YYYY/MM/DD, is:unread|read|starred|unstarred, has:attachment, in:<mailbox> and free words (searched as one phrase), each operator once.',
       ),
-    pageSize: z.int().min(1).max(50).default(20),
+    pageSize: pageSizeSchema,
     pageToken: z.string().optional().describe('nextPageToken from the previous call.'),
     view: viewSchema.describe('ids: only ids; metadata: no subject; minimal: everything.'),
   };
@@ -191,7 +195,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     'get_thread',
     {
       title: 'Get a conversation',
-      description: `Returns the messages of a conversation in chronological order: the newest 50 at most, with olderOmitted counting the older ones left out. ${UNTRUSTED_NOTE}`,
+      description: `Returns the messages of a conversation in chronological order: the newest ${String(THREAD_MESSAGE_LIMIT)} at most, with olderOmitted counting the older ones left out. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({ threadId: z.string(), format: formatSchema }),
       annotations: READ_ONLY,
     },
@@ -206,7 +210,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     'download_attachment',
     {
       title: 'Download an attachment',
-      description: `Returns an attachment file (max 12 MB). Take attachmentId from get_message. ${UNTRUSTED_NOTE}`,
+      description: `Returns an attachment file (max ${String(ATTACHMENT_LIMIT_BYTES / (1024 * 1024))} MB). Take attachmentId from get_message. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({ messageId: z.string(), attachmentId: z.string() }),
       annotations: READ_ONLY,
     },
@@ -242,7 +246,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     );
 
   const draftsFields = {
-    pageSize: z.int().min(1).max(50).default(20),
+    pageSize: pageSizeSchema,
     pageToken: z.string().optional(),
   };
   const draftsMeta = {
