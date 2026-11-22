@@ -169,3 +169,16 @@ describe('ImapMailProvider long threads', () => {
     expect(thread.messages.at(-1)?.subject).toBe(`mail ${String(THREAD_MESSAGE_LIMIT + 5)}`);
   });
 });
+
+describe('ImapMailProvider raw threads', () => {
+  it('refuses the raw format for a whole thread and points to get_message', async () => {
+    const fake = fakeServer([4, 5]);
+    const result = providerFor(fake).getThread(
+      { kind: 'references', account: 'work', mailbox: 'INBOX', rootMessageId: '<m4@example.org>' },
+      'raw',
+    );
+    await expect(result).rejects.toMatchObject({ code: 'unsupported_format' });
+    await expect(result).rejects.toThrow('get_message');
+    expect(fake.fetchQueries).toEqual([]);
+  });
+});

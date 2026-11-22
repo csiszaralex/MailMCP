@@ -81,6 +81,13 @@ export class ImapMailProvider implements MailProvider {
 
   async getThread(ref: ThreadRef, format: BodyFormat): Promise<ThreadPage> {
     this.#assertOwn(ref.account);
+    if (format === 'raw') {
+      // Up to THREAD_MESSAGE_LIMIT raw sources of RAW_LIMIT_BYTES each would not fit in memory.
+      throw new MailError(
+        'unsupported_format',
+        'The raw format is not available for a whole thread; use get_message for one message.',
+      );
+    }
     return this.pool.use(this.account, async (client) => {
       let path: string;
       let criteria: SearchObject;

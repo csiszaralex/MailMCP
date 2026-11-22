@@ -201,7 +201,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     'get_thread',
     {
       title: 'Get a conversation',
-      description: `Returns the messages of a conversation in chronological order: the newest ${String(THREAD_MESSAGE_LIMIT)} at most, with olderOmitted counting the older ones left out. ${UNTRUSTED_NOTE}`,
+      description: `Returns the messages of a conversation in chronological order: the newest ${String(THREAD_MESSAGE_LIMIT)} at most, with olderOmitted counting the older ones left out. format: plain (default), html or metadata; raw only through get_message. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({ threadId: z.string(), format: formatSchema }),
       annotations: READ_ONLY,
     },

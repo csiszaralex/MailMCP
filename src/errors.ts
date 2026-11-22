@@ -9,6 +9,8 @@ export type MailErrorCode =
   /** The mail server answered NO or BAD to a SEARCH it was sent. */
   | 'search_failed'
   | 'too_large'
+  /** The tool does not offer this format (raw is per message only). */
+  | 'unsupported_format'
   | 'connection_failed';
 
 /** An expected failure whose message is safe to show to the MCP client. */
