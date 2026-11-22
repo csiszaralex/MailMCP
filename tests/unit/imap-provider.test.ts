@@ -24,7 +24,6 @@ const ACCOUNT: Account = {
   imap: { host: 'mail.example.org', port: 993 },
   smtp: { host: 'mail.example.org', port: 465 },
   mailboxes: {},
-  password: 'x',
 };
 
 /** A mail with a short text part and a 30 MB attachment. */

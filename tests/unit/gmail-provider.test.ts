@@ -23,7 +23,6 @@ const ACCOUNT: Account = {
   imap: { host: 'imap.gmail.com', port: 993 },
   smtp: { host: 'smtp.gmail.com', port: 465 },
   mailboxes: {},
-  password: 'x',
 };
 
 const ALL_MAIL = '[Gmail]/Összes levél';

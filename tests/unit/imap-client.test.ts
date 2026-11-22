@@ -14,13 +14,12 @@ function account(port: number): Account {
     imap: { host: 'mail.example.org', port },
     smtp: { host: 'mail.example.org', port: 465 },
     mailboxes: {},
-    password: 'secret',
   };
 }
 
 describe('imapConnectionOptions', () => {
   it('uses implicit TLS on 993 with certificate verification', () => {
-    const options = imapConnectionOptions(account(993));
+    const options = imapConnectionOptions(account(993), 'secret');
     expect(options).toMatchObject({
       host: 'mail.example.org',
       port: 993,
@@ -32,12 +31,12 @@ describe('imapConnectionOptions', () => {
   });
 
   it('gives up on a silent server instead of waiting five minutes', () => {
-    expect(imapConnectionOptions(account(993)).socketTimeout).toBe(SOCKET_TIMEOUT_MS);
+    expect(imapConnectionOptions(account(993), 'secret').socketTimeout).toBe(SOCKET_TIMEOUT_MS);
     expect(SOCKET_TIMEOUT_MS).toBeLessThan(5 * 60_000);
   });
 
   it('requires STARTTLS on any other port', () => {
-    const options = imapConnectionOptions(account(143));
+    const options = imapConnectionOptions(account(143), 'secret');
     expect(options.secure).toBe(false);
     expect(options.doSTARTTLS).toBe(true);
     expect(options.tls).toMatchObject({ rejectUnauthorized: true });

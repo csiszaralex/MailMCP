@@ -63,9 +63,17 @@ describe('loadConfig', () => {
     expect(personal?.imap).toEqual({ host: 'imap.gmail.com', port: 993 });
     expect(personal?.smtp).toEqual({ host: 'smtp.gmail.com', port: 465 });
     expect(personal?.username).toBe('someone@gmail.com');
-    expect(personal?.password).toBe('p1');
+    expect(personal).not.toHaveProperty('password');
+    expect(JSON.stringify(config.accounts)).not.toContain('p1');
     expect(personal?.owner).toBe('alex');
     expect(personal?.signature).toBe('Cheers\n');
+  });
+
+  it('keeps passwords in a lookup apart from the accounts', () => {
+    const config = loadConfig(VALID, ENV);
+    expect(config.passwordFor('personal')).toBe('p1');
+    expect(config.passwordFor('work-box')).toBe('p2');
+    expect(() => config.passwordFor('nope')).toThrow('nope');
   });
 
   it('keeps explicit IMAP settings, username and mailbox overrides', () => {

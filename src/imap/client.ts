@@ -12,7 +12,7 @@ import type {
   MailboxObject,
   SearchObject,
 } from 'imapflow';
-import type { Account } from '../config/types.js';
+import type { Account, PasswordLookup } from '../config/types.js';
 
 /**
  * The part of ImapFlow this project uses. Narrow on purpose: tests can fake it,
@@ -53,14 +53,14 @@ export const CONNECTION_TIMEOUT_MS = 15_000;
 export const SOCKET_TIMEOUT_MS = 60_000;
 
 /** TLS is mandatory and certificate checks cannot be turned off (spec: "Levelezőszerverek felé"). */
-export function imapConnectionOptions(account: Account): ImapFlowOptions {
+export function imapConnectionOptions(account: Account, password: string): ImapFlowOptions {
   const implicitTls = account.imap.port === 993;
   return {
     host: account.imap.host,
     port: account.imap.port,
     secure: implicitTls,
     doSTARTTLS: implicitTls ? undefined : true,
-    auth: { user: account.username, pass: account.password },
+    auth: { user: account.username, pass: password },
     tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
     logger: false,
     disableAutoIdle: true,
@@ -69,8 +69,11 @@ export function imapConnectionOptions(account: Account): ImapFlowOptions {
   };
 }
 
-export const connectTls: ImapClientFactory = async (account) => {
-  const client = new ImapFlow(imapConnectionOptions(account));
-  await client.connect();
-  return client;
-};
+/** The production factory: TLS connections, passwords from the lookup loadConfig built. */
+export function tlsConnector(passwordFor: PasswordLookup): ImapClientFactory {
+  return async (account) => {
+    const client = new ImapFlow(imapConnectionOptions(account, passwordFor(account.id)));
+    await client.connect();
+    return client;
+  };
+}

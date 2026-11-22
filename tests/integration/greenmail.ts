@@ -9,8 +9,10 @@ const IMAP_PORT = 3143;
 export interface GreenMail {
   container: StartedTestContainer;
   account: Account;
-  /** Plaintext factory: only tests may connect without TLS. */
+  /** Plaintext factory with the right password: only tests may connect without TLS. */
   connect: ImapClientFactory;
+  /** The same factory with any password, to test rejected logins. */
+  connectAs: (password: string) => ImapClientFactory;
 }
 
 export async function startGreenMail(): Promise<GreenMail> {
@@ -36,22 +38,23 @@ export async function startGreenMail(): Promise<GreenMail> {
     imap: { host, port },
     smtp: { host, port: 3025 },
     mailboxes: {},
-    password: 'secret',
   };
-  const connect: ImapClientFactory = async (acc) => {
-    const client = new ImapFlow({
-      host: acc.imap.host,
-      port: acc.imap.port,
-      secure: false,
-      doSTARTTLS: false,
-      auth: { user: acc.username, pass: acc.password },
-      logger: false,
-      disableAutoIdle: true,
-    });
-    await client.connect();
-    return client;
-  };
-  return { container, account, connect };
+  const connectAs =
+    (password: string): ImapClientFactory =>
+    async (acc) => {
+      const client = new ImapFlow({
+        host: acc.imap.host,
+        port: acc.imap.port,
+        secure: false,
+        doSTARTTLS: false,
+        auth: { user: acc.username, pass: password },
+        logger: false,
+        disableAutoIdle: true,
+      });
+      await client.connect();
+      return client;
+    };
+  return { container, account, connect: connectAs('secret'), connectAs };
 }
 
 function mail(lines: string[]): Buffer {

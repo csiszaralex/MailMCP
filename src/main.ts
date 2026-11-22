@@ -3,7 +3,7 @@ import { serve } from '@hono/node-server';
 import { loadConfig, parsePort } from './config/load.js';
 import { MailError } from './errors.js';
 import { createApp } from './http/app.js';
-import { connectTls } from './imap/client.js';
+import { tlsConnector } from './imap/client.js';
 import { ImapPool } from './imap/pool.js';
 import { errorClass, stderrLogger } from './log.js';
 import { ImapMailProvider } from './mail/imap-provider.js';
@@ -26,7 +26,7 @@ try {
   process.exit(1);
 }
 
-const pool = new ImapPool(connectTls);
+const pool = new ImapPool(tlsConnector(config.passwordFor));
 const providers = new Map(config.accounts.map((a) => [a.id, new ImapMailProvider(a, pool)]));
 const deps: ToolDeps = {
   providerFor: (id) => {

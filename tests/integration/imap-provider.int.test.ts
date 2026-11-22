@@ -204,7 +204,7 @@ describe('authentication back-off', () => {
     let connects = 0;
     const badPool = new ImapPool((acc) => {
       connects += 1;
-      return gm.connect({ ...acc, password: 'wrong' });
+      return gm.connectAs('wrong')(acc);
     });
     const use = () => badPool.use(gm.account, () => Promise.resolve());
     await expect(use()).rejects.toMatchObject({ code: 'connection_failed' });

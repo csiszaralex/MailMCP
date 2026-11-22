@@ -56,6 +56,7 @@ export function loadConfig(
   const problems: string[] = [];
   const seen = new Set<string>();
   const accounts: Account[] = [];
+  const passwords = new Map<string, string>();
 
   for (const entry of parsed.data.accounts) {
     if (seen.has(entry.id)) problems.push(`duplicate account id "${entry.id}"`);
@@ -79,10 +80,15 @@ export function loadConfig(
       imap: entry.provider === 'gmail' ? GMAIL_IMAP : entry.imap,
       smtp: entry.provider === 'gmail' ? GMAIL_SMTP : entry.smtp,
       mailboxes: entry.mailboxes ?? {},
-      password,
     });
+    passwords.set(entry.id, password);
   }
 
   if (problems.length > 0) throw invalid(`- ${problems.join('\n- ')}`);
-  return { owner: parsed.data.owner, accounts };
+  const passwordFor = (accountId: string): string => {
+    const password = passwords.get(accountId);
+    if (password === undefined) throw new Error(`No password for account "${accountId}".`);
+    return password;
+  };
+  return { owner: parsed.data.owner, accounts, passwordFor };
 }

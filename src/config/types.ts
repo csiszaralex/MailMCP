@@ -19,10 +19,14 @@ export interface Account {
   imap: Endpoint;
   smtp: Endpoint;
   mailboxes: MailboxOverrides;
-  password: string;
 }
+
+/** An account's IMAP/SMTP password. Kept out of Account, so code that gets accounts never holds it. */
+export type PasswordLookup = (accountId: string) => string;
 
 export interface Config {
   owner: string;
   accounts: Account[];
+  /** Only for the connection factory; never hand it to the tool layer. */
+  passwordFor: PasswordLookup;
 }
