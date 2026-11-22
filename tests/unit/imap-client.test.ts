@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { imapConnectionOptions } from '../../src/imap/client.js';
+import { imapConnectionOptions, SOCKET_TIMEOUT_MS } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
 
 function account(port: number): Account {
@@ -29,6 +29,11 @@ describe('imapConnectionOptions', () => {
       tls: { rejectUnauthorized: true },
       logger: false,
     });
+  });
+
+  it('gives up on a silent server instead of waiting five minutes', () => {
+    expect(imapConnectionOptions(account(993)).socketTimeout).toBe(SOCKET_TIMEOUT_MS);
+    expect(SOCKET_TIMEOUT_MS).toBeLessThan(5 * 60_000);
   });
 
   it('requires STARTTLS on any other port', () => {

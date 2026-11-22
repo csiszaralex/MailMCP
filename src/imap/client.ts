@@ -47,6 +47,11 @@ export interface ImapClient {
 
 export type ImapClientFactory = (account: Account) => Promise<ImapClient>;
 
+/** Budget for TCP, TLS and the greeting of a new connection. */
+export const CONNECTION_TIMEOUT_MS = 15_000;
+/** A server silent this long in the middle of a command is treated as stalled (imapflow default: 5 min). */
+export const SOCKET_TIMEOUT_MS = 60_000;
+
 /** TLS is mandatory and certificate checks cannot be turned off (spec: "Levelezőszerverek felé"). */
 export function imapConnectionOptions(account: Account): ImapFlowOptions {
   const implicitTls = account.imap.port === 993;
@@ -59,7 +64,8 @@ export function imapConnectionOptions(account: Account): ImapFlowOptions {
     tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
     logger: false,
     disableAutoIdle: true,
-    connectionTimeout: 15_000,
+    connectionTimeout: CONNECTION_TIMEOUT_MS,
+    socketTimeout: SOCKET_TIMEOUT_MS,
   };
 }
 

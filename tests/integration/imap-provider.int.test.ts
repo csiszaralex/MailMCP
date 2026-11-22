@@ -198,3 +198,17 @@ describe('labels and drafts', () => {
     expect(page.messages.map((m) => m.subject)).toEqual(['Draft note']);
   });
 });
+
+describe('authentication back-off', () => {
+  it('does not retry a login the server rejected', async () => {
+    let connects = 0;
+    const badPool = new ImapPool((acc) => {
+      connects += 1;
+      return gm.connect({ ...acc, password: 'wrong' });
+    });
+    const use = () => badPool.use(gm.account, () => Promise.resolve());
+    await expect(use()).rejects.toMatchObject({ code: 'connection_failed' });
+    await expect(use()).rejects.toThrow('not retrying');
+    expect(connects).toBe(1);
+  });
+});

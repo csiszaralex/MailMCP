@@ -3,9 +3,17 @@ import { MailError } from '../errors.js';
 import { errorClass, stderrConnectionLogger, type ConnectionLogger } from '../log.js';
 import type { ImapClient, ImapClientFactory } from './client.js';
 
+/**
+ * After the server rejected a login, new connects for that account are refused for this long:
+ * retrying a wrong password on every tool call risks a lockout at the provider.
+ */
+export const AUTH_BACKOFF_MS = 5 * 60_000;
+
 class PoolEntry {
   active = 0;
   broken = false;
+  /** The connect failed because the server rejected the credentials. */
+  authFailed = false;
   timer: NodeJS.Timeout | undefined;
   readonly client: Promise<ImapClient>;
 
@@ -35,6 +43,9 @@ class PoolEntry {
       return client;
     } catch (err) {
       this.broken = true;
+      // imapflow sets authenticationFailed when the server answers LOGIN or AUTHENTICATE with NO or BAD.
+      this.authFailed =
+        err instanceof Error && 'authenticationFailed' in err && err.authenticationFailed === true;
       const reason = err instanceof Error ? err.message : String(err);
       throw new MailError(
         'connection_failed',
@@ -48,6 +59,8 @@ class PoolEntry {
 /** One IMAP connection per account, opened on demand and closed after idleMs without use. */
 export class ImapPool {
   readonly #entries = new Map<string, PoolEntry>();
+  /** Account id to the time (ms since epoch) until which a login is not retried. */
+  readonly #loginBlockedUntil = new Map<string, number>();
 
   constructor(
     private readonly connect: ImapClientFactory,
@@ -56,9 +69,18 @@ export class ImapPool {
   ) {}
 
   async use<T>(account: Account, fn: (client: ImapClient) => Promise<T>): Promise<T> {
+    this.#assertLoginAllowed(account);
     const entry = this.#acquire(account);
     try {
-      const client = await entry.client;
+      let client;
+      try {
+        client = await entry.client;
+      } catch (err) {
+        if (entry.authFailed) {
+          this.#loginBlockedUntil.set(account.id, Date.now() + AUTH_BACKOFF_MS);
+        }
+        throw err;
+      }
       try {
         return await fn(client);
       } finally {
@@ -77,6 +99,20 @@ export class ImapPool {
         clearTimeout(entry.timer);
         await logoutEntry(entry);
       }),
+    );
+  }
+
+  #assertLoginAllowed(account: Account): void {
+    const until = this.#loginBlockedUntil.get(account.id);
+    if (until === undefined) return;
+    const waitMs = until - Date.now();
+    if (waitMs <= 0) {
+      this.#loginBlockedUntil.delete(account.id);
+      return;
+    }
+    throw new MailError(
+      'connection_failed',
+      `The mail server rejected the login for account "${account.id}"; not retrying for ${String(Math.ceil(waitMs / 1000))} more seconds. Check the app password.`,
     );
   }
 

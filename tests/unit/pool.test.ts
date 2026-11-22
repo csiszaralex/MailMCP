@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ImapPool } from '../../src/imap/pool.js';
+import { AUTH_BACKOFF_MS, ImapPool } from '../../src/imap/pool.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
 import { MailError } from '../../src/errors.js';
@@ -154,16 +154,39 @@ describe('ImapPool', () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
-  it('wraps a failed login in connection_failed and retries next time', async () => {
+  it('wraps a failed connect in connection_failed and retries next time', async () => {
     const fake = fakeClient();
     const connect = vi
       .fn<() => Promise<ImapClient>>()
-      .mockRejectedValueOnce(new Error('AUTHENTICATIONFAILED'))
+      .mockRejectedValueOnce(
+        Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      )
       .mockResolvedValue(fake.client);
     const pool = new ImapPool(connect, 60_000);
     const failure = pool.use(ACCOUNT, () => Promise.resolve());
     await expect(failure).rejects.toBeInstanceOf(MailError);
     await expect(failure).rejects.toMatchObject({ code: 'connection_failed' });
+    await pool.use(ACCOUNT, () => Promise.resolve());
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a rejected login until the back-off has passed', async () => {
+    const fake = fakeClient();
+    const rejected = Object.assign(new Error('Command failed'), { authenticationFailed: true });
+    const connect = vi
+      .fn<() => Promise<ImapClient>>()
+      .mockRejectedValueOnce(rejected)
+      .mockResolvedValue(fake.client);
+    const pool = new ImapPool(connect, 60_000);
+    await expect(pool.use(ACCOUNT, () => Promise.resolve())).rejects.toMatchObject({
+      code: 'connection_failed',
+    });
+    const blocked = pool.use(ACCOUNT, () => Promise.resolve());
+    await expect(blocked).rejects.toMatchObject({ code: 'connection_failed' });
+    await expect(blocked).rejects.toThrow('app password');
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(AUTH_BACKOFF_MS);
     await pool.use(ACCOUNT, () => Promise.resolve());
     expect(connect).toHaveBeenCalledTimes(2);
   });
