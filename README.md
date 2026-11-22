@@ -2,7 +2,7 @@
 
 Távoli MCP szerver, amelyen keresztül a Claude egyszerre több postafiókot kezel: Gmailt, Google Workspace-t és bármilyen IMAP/SMTP fiókot. A képességei a Claude beépített Gmail connectoráét követik (keresés, olvasás, mellékletek, piszkozatok, címkék, kuka, küldés), csak nem egy, hanem tetszőleges számú fiókra.
 
-> **Állapot:** tervezés. A szerver még nem működik. A jóváhagyott terv: [docs/superpowers/specs/2026-11-22-mailmcp-design.md](docs/superpowers/specs/2026-11-22-mailmcp-design.md).
+> **Állapot:** 1. fázis kész: lokálisan futó, csak olvasó szerver, hitelesítés nélkül. Nyilvános címre még nem telepíthető.
 
 ## Mire jó
 
@@ -38,6 +38,17 @@ A mappa gyökerében egy `.mcp.json`:
 ```
 
 Az URL végén a fiók azonosítója áll. Ezen a címen a szerver csak azt az egy fiókot mutatja, és a kiadott token máshol nem érvényes. A fájlban nincs titok, nyugodtan commitolható.
+
+## Lokális futtatás (1. fázis)
+
+> Hitelesítés még nincs: a szerver csak a `127.0.0.1` címen figyel. Ne tedd elérhetővé más gépről.
+
+1. `cp accounts.example.yaml accounts.yaml`, és töltsd ki a saját fiókjaiddal (ez a fájl gitignore-olt).
+2. Minden fiókhoz állíts be egy környezeti változót az alkalmazásjelszóval: `MAILMCP_PASSWORD_<ID>` (az id nagybetűvel, a kötőjel aláhúzásra cserélve).
+3. `pnpm install && pnpm dev`
+4. Claude Code-ban: `claude mcp add --transport http mail-local http://127.0.0.1:8787/mcp`, vagy egy fiókhoz: `.../mcp/<fiók-id>`.
+
+Fejlesztéshez: `pnpm test` (Docker kell a GreenMail integrációs tesztekhez), `pnpm test:unit` (Docker nélkül).
 
 ## Hogyan működik
 
