@@ -121,7 +121,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
       .string()
       .default('')
       .describe(
-        'Gmail search syntax. Gmail accounts support all operators. Other accounts support from:, to:, cc:, subject:, after:YYYY/MM/DD, before:YYYY/MM/DD, is:unread|read|starred|unstarred, has:attachment, in:<mailbox> and free words (searched as one phrase), each operator once.',
+        'Gmail search syntax. Gmail accounts support all operators. Other accounts support from:, to:, cc:, subject:, after:YYYY/MM/DD, before:YYYY/MM/DD, is:unread|read|starred|unstarred, has:attachment (approximate: matches multipart/mixed mail), in:<mailbox> (inbox, sent, drafts, trash, spam, all or a folder path) and free words (searched as one phrase), each operator once.',
       ),
     pageSize: pageSizeSchema,
     pageToken: z.string().optional().describe('nextPageToken from the previous call.'),

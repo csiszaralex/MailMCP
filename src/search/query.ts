@@ -22,7 +22,43 @@ const IN_ALIASES: Record<string, MailboxSelector> = {
   bin: { kind: 'special', use: '\\Trash' },
   spam: { kind: 'special', use: '\\Junk' },
   junk: { kind: 'special', use: '\\Junk' },
+  all: { kind: 'special', use: '\\All' },
+  anywhere: { kind: 'special', use: '\\All' },
 };
+
+/**
+ * Gmail operators that plain IMAP cannot express: they fail loudly. Any other "word:" token
+ * (re:hello, a URL) is searched as free text.
+ */
+const GMAIL_ONLY_OPERATORS = new Set([
+  'bcc',
+  'label',
+  'category',
+  'filename',
+  'list',
+  'deliveredto',
+  'rfc822msgid',
+  'larger',
+  'smaller',
+  'size',
+  'older',
+  'newer',
+  'older_than',
+  'newer_than',
+]);
+
+/** Operators translated below; each has a case in translateQuery's switch. */
+const IMAP_OPERATORS = new Set([
+  'from',
+  'to',
+  'cc',
+  'subject',
+  'after',
+  'before',
+  'is',
+  'has',
+  'in',
+]);
 
 function unsupported(message: string): MailError {
   return new MailError('unsupported_query', message);
@@ -69,11 +105,11 @@ export function translateQuery(query: string): ImapQuery {
     }
 
     const operator = /^([a-z_]+):(.+)$/i.exec(token);
-    if (operator === null) {
+    const name = (operator?.[1] ?? '').toLowerCase();
+    if (operator === null || !(IMAP_OPERATORS.has(name) || GMAIL_ONLY_OPERATORS.has(name))) {
       words.push(unquote(token));
       continue;
     }
-    const name = (operator[1] ?? '').toLowerCase();
     const value = unquote(operator[2] ?? '');
 
     switch (name) {

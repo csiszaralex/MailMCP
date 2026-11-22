@@ -67,11 +67,25 @@ describe('translateQuery', () => {
     });
   });
 
+  it('treats unknown word: tokens and URLs as free text', () => {
+    expect(translateQuery('re:hello https://example.org/a').criteria).toEqual({
+      text: 're:hello https://example.org/a',
+    });
+  });
+
+  it('maps in:all and in:anywhere to the \\All mailbox', () => {
+    expect(translateQuery('in:all').mailbox).toEqual({ kind: 'special', use: '\\All' });
+    expect(translateQuery('in:anywhere').mailbox).toEqual({ kind: 'special', use: '\\All' });
+  });
+
   it('rejects what plain IMAP cannot express', () => {
     expectUnsupported('from:a OR from:b', 'OR');
     expectUnsupported('-from:a', 'negation');
     expectUnsupported('subject:(a b)', 'grouping');
     expectUnsupported('newer_than:7d', 'newer_than');
+    expectUnsupported('label:work', 'label');
+    expectUnsupported('larger:5M', 'larger');
+    expectUnsupported('category:promotions', 'category');
     expectUnsupported('has:drive', 'has:drive');
     expectUnsupported('is:important', 'is:important');
     expectUnsupported('from:a from:b', 'more than once');
