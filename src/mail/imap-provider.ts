@@ -113,6 +113,9 @@ export class ImapMailProvider implements MailProvider {
           0,
           THREAD_MESSAGE_LIMIT,
         );
+        if (uids.length === 0) {
+          throw new MailError('not_found', 'No messages of this thread were found; search again.');
+        }
         return this.#details(client, path, uidValidity, uids, format);
       });
     });
@@ -348,7 +351,13 @@ function messageGone(): MailError {
   return new MailError('not_found', 'Message not found; it may have been moved or deleted.');
 }
 
+/** imapflow resolves false when the server answers NO or BAD, and undefined without a mailbox. */
 function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
-  const uids = found === false || found === undefined ? [] : [...found];
-  return uids.sort((a, b) => (order === 'asc' ? a - b : b - a));
+  if (found === false || found === undefined) {
+    throw new MailError(
+      'search_failed',
+      'The mail server rejected this search; try simpler terms.',
+    );
+  }
+  return [...found].sort((a, b) => (order === 'asc' ? a - b : b - a));
 }

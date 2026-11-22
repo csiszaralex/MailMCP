@@ -48,7 +48,7 @@ interface Fake {
   downloads: { uid: string; part: string }[];
 }
 
-function fakeServer(uids: number[]): Fake {
+function fakeServer(uids: number[], searchResult: number[] | false = uids): Fake {
   const fetchQueries: FetchQueryObject[] = [];
   const downloads: { uid: string; part: string }[] = [];
   const message = (uid: number): FetchMessageObject => ({
@@ -64,7 +64,7 @@ function fakeServer(uids: number[]): Fake {
       return { path: 'INBOX', uidValidity: 9n } as MailboxObject;
     },
     getMailboxLock: (path: string) => Promise.resolve({ path, release: () => undefined }),
-    search: () => Promise.resolve(uids),
+    search: () => Promise.resolve(searchResult),
     fetchAll: (_range: string, query: FetchQueryObject) => {
       fetchQueries.push(query);
       return Promise.resolve(uids.map(message));
@@ -123,5 +123,34 @@ describe('ImapMailProvider body download', () => {
     });
     expect(fake.fetchQueries.every((q) => q.source === undefined)).toBe(true);
     expect(RAW_LIMIT_BYTES).toBeLessThan(30 * 1024 * 1024);
+  });
+});
+
+describe('ImapMailProvider search failures', () => {
+  it('reports a search the server refused instead of an empty result', async () => {
+    const fake = fakeServer([], false);
+    await expect(providerFor(fake).search('from:bob@example.org', 0, 20)).rejects.toMatchObject({
+      code: 'search_failed',
+    });
+  });
+
+  it('reports a refused thread search', async () => {
+    const fake = fakeServer([], false);
+    await expect(
+      providerFor(fake).getThread(
+        { kind: 'references', account: 'work', mailbox: 'INBOX', rootMessageId: '<m@example.org>' },
+        'metadata',
+      ),
+    ).rejects.toMatchObject({ code: 'search_failed' });
+  });
+
+  it('reports a thread without messages as not_found', async () => {
+    const fake = fakeServer([]);
+    await expect(
+      providerFor(fake).getThread(
+        { kind: 'references', account: 'work', mailbox: 'INBOX', rootMessageId: '<m@example.org>' },
+        'metadata',
+      ),
+    ).rejects.toMatchObject({ code: 'not_found' });
   });
 });

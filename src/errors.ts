@@ -6,6 +6,8 @@ export type MailErrorCode =
   | 'not_found'
   | 'mailbox_not_found'
   | 'unsupported_query'
+  /** The mail server answered NO or BAD to a SEARCH it was sent. */
+  | 'search_failed'
   | 'too_large'
   | 'connection_failed';
 
