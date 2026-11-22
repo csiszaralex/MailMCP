@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { YAMLError } from 'yaml';
 import { parseYamlText } from '../boundary.js';
 import { MailError } from '../errors.js';
 import { configFileSchema } from './schema.js';
@@ -30,6 +31,14 @@ function invalid(details: string): MailError {
   return new MailError('config_invalid', `accounts.yaml is invalid:\n${details}`);
 }
 
+/** The YAML error's code and position only: its message quotes the line, which may hold an address. */
+function yamlErrorText(err: Error | undefined): string {
+  if (!(err instanceof YAMLError)) return 'YAML could not be parsed';
+  const pos = err.linePos?.[0];
+  const where = pos === undefined ? '' : ` at line ${String(pos.line)}, column ${String(pos.col)}`;
+  return `YAML syntax error ${err.code}${where}`;
+}
+
 export function loadConfig(
   yamlText: string,
   env: Readonly<Record<string, string | undefined>>,
@@ -38,7 +47,7 @@ export function loadConfig(
   try {
     raw = parseYamlText(yamlText);
   } catch (err) {
-    throw invalid(err instanceof Error ? err.message : 'YAML could not be parsed');
+    throw invalid(yamlErrorText(err instanceof Error ? err : undefined));
   }
 
   const parsed = configFileSchema.safeParse(raw);

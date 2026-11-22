@@ -133,4 +133,14 @@ accounts:
   it('reports YAML syntax errors as config errors', () => {
     expectConfigError(() => loadConfig('owner: [unclosed', {}), 'accounts.yaml');
   });
+
+  it('names the YAML error position without echoing the config line', () => {
+    const yaml = 'owner: alex\naccounts:\n  - id: a\n    address: [secret@example.org\n';
+    expectConfigError(() => loadConfig(yaml, {}), 'line 5, column 1');
+    try {
+      loadConfig(yaml, {});
+    } catch (err) {
+      expect(err instanceof Error ? err.message : '').not.toContain('secret');
+    }
+  });
 });
