@@ -392,7 +392,14 @@ function messageGone(): MailError {
 
 /** imapflow resolves false when the server answers NO or BAD, and undefined without a mailbox. */
 function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
-  if (found === false || found === undefined) {
+  if (found === undefined) {
+    // We hold a mailbox lock, so no selected mailbox means the connection went away meanwhile.
+    throw new MailError(
+      'connection_failed',
+      'The connection to the mail server was lost during the search; try again.',
+    );
+  }
+  if (found === false) {
     throw new MailError(
       'search_failed',
       'The mail server rejected this search; try simpler terms.',

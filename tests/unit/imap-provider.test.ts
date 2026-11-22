@@ -49,7 +49,7 @@ interface Fake {
 
 function fakeServer(
   uids: number[],
-  searchResult: number[] | false = uids,
+  searchResult: number[] | false | 'no-mailbox' = uids,
   structure: MessageStructureObject = STRUCTURE,
   partText = 'Hello text\n',
 ): Fake {
@@ -68,7 +68,7 @@ function fakeServer(
       return { path: 'INBOX', uidValidity: 9n } as MailboxObject;
     },
     getMailboxLock: (path: string) => Promise.resolve({ path, release: () => undefined }),
-    search: () => Promise.resolve(searchResult),
+    search: () => Promise.resolve(searchResult === 'no-mailbox' ? undefined : searchResult),
     fetchAll: (_range: string, query: FetchQueryObject) => {
       fetchQueries.push(query);
       return Promise.resolve(uids.map(message));
@@ -137,6 +137,13 @@ describe('ImapMailProvider search failures', () => {
     await expect(providerFor(fake).search('from:bob@example.org', 0, 20)).rejects.toMatchObject({
       code: 'search_failed',
     });
+  });
+
+  it('reports a search without a selected mailbox as a lost connection', async () => {
+    const fake = fakeServer([], 'no-mailbox');
+    const result = providerFor(fake).search('from:bob@example.org', 0, 20);
+    await expect(result).rejects.toMatchObject({ code: 'connection_failed' });
+    await expect(result).rejects.toThrow('connection');
   });
 
   it('reports a refused thread search', async () => {
