@@ -7,7 +7,7 @@ import type {
   MailboxObject,
   MessageStructureObject,
 } from 'imapflow';
-import { ImapMailProvider } from '../../src/mail/imap-provider.js';
+import { ImapMailProvider, THREAD_MESSAGE_LIMIT } from '../../src/mail/imap-provider.js';
 import { ImapPool } from '../../src/imap/pool.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
@@ -109,7 +109,7 @@ describe('ImapMailProvider body download', () => {
       { kind: 'references', account: 'work', mailbox: 'INBOX', rootMessageId: '<m4@example.org>' },
       'plain',
     );
-    expect(thread).toHaveLength(2);
+    expect(thread.messages).toHaveLength(2);
     expect(fake.fetchQueries.every((q) => q.source === undefined)).toBe(true);
     expect(fake.downloads).toEqual([
       { uid: '4', part: '1' },
@@ -153,5 +153,20 @@ describe('ImapMailProvider search failures', () => {
         'metadata',
       ),
     ).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
+describe('ImapMailProvider long threads', () => {
+  it('keeps the newest messages and reports how many older ones were left out', async () => {
+    const uids = Array.from({ length: THREAD_MESSAGE_LIMIT + 5 }, (_, i) => i + 1);
+    const fake = fakeServer(uids);
+    const thread = await providerFor(fake).getThread(
+      { kind: 'references', account: 'work', mailbox: 'INBOX', rootMessageId: '<m1@example.org>' },
+      'metadata',
+    );
+    expect(thread.olderOmitted).toBe(5);
+    expect(thread.messages).toHaveLength(THREAD_MESSAGE_LIMIT);
+    expect(thread.messages[0]?.subject).toBe('mail 6');
+    expect(thread.messages.at(-1)?.subject).toBe(`mail ${String(THREAD_MESSAGE_LIMIT + 5)}`);
   });
 });

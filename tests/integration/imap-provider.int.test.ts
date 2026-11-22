@@ -147,7 +147,11 @@ describe('getThread', () => {
     const [reply] = (await provider.search('subject:"Re: Invoice"', 0, 1)).messages;
     if (reply === undefined) throw new Error('seed missing');
     const thread = await provider.getThread(decodeThreadId(reply.threadId), 'plain');
-    expect(thread.map((m) => m.subject)).toEqual(['Invoice 2026-11', 'Re: Invoice 2026-11']);
+    expect(thread.messages.map((m) => m.subject)).toEqual([
+      'Invoice 2026-11',
+      'Re: Invoice 2026-11',
+    ]);
+    expect(thread.olderOmitted).toBe(0);
   });
 });
 

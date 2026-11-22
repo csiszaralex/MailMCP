@@ -31,6 +31,7 @@ import type {
   MessageDetail,
   MessageSummary,
   SearchPage,
+  ThreadPage,
 } from './types.js';
 
 export const ATTACHMENT_LIMIT_BYTES = 12 * 1024 * 1024;
@@ -82,7 +83,7 @@ export class ImapMailProvider implements MailProvider {
     );
   }
 
-  async getThread(ref: ThreadRef, format: BodyFormat): Promise<MessageDetail[]> {
+  async getThread(ref: ThreadRef, format: BodyFormat): Promise<ThreadPage> {
     this.#assertOwn(ref.account);
     return this.pool.use(this.account, async (client) => {
       let path: string;
@@ -110,14 +111,15 @@ export class ImapMailProvider implements MailProvider {
         };
       }
       return this.#withMailbox(client, path, 'id', async (uidValidity) => {
-        const uids = sortedUids(await client.search(criteria, { uid: true }), 'asc').slice(
-          0,
-          THREAD_MESSAGE_LIMIT,
-        );
-        if (uids.length === 0) {
+        const all = sortedUids(await client.search(criteria, { uid: true }), 'asc');
+        if (all.length === 0) {
           throw new MailError('not_found', 'No messages of this thread were found; search again.');
         }
-        return this.#details(client, path, uidValidity, uids, format);
+        const newest = all.slice(-THREAD_MESSAGE_LIMIT);
+        return {
+          messages: await this.#details(client, path, uidValidity, newest, format),
+          olderOmitted: all.length - newest.length,
+        };
       });
     });
   }

@@ -42,7 +42,7 @@ function fakeProvider(acc: Account): MailProvider {
     account: acc,
     search: () => Promise.resolve({ total: 1, messages: [summary(acc.id)] }),
     getMessage: () => Promise.resolve(detail),
-    getThread: () => Promise.resolve([detail]),
+    getThread: () => Promise.resolve({ messages: [detail], olderOmitted: 0 }),
     downloadAttachment: () =>
       Promise.resolve({ filename: 'a.pdf', mimeType: 'application/pdf', data: Buffer.from('pdf') }),
     listLabels: () => Promise.resolve([{ name: 'INBOX', specialUse: null }]),

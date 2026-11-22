@@ -191,14 +191,14 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
     'get_thread',
     {
       title: 'Get a conversation',
-      description: `Returns the messages of a conversation in chronological order (at most 50). ${UNTRUSTED_NOTE}`,
+      description: `Returns the messages of a conversation in chronological order: the newest 50 at most, with olderOmitted counting the older ones left out. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({ threadId: z.string(), format: formatSchema }),
       annotations: READ_ONLY,
     },
     (args) =>
       run('get_thread', threadTarget(args.threadId), async () => {
         const ref = decodeThreadId(args.threadId);
-        return jsonResult({ messages: await providerOf(ref.account).getThread(ref, args.format) });
+        return jsonResult(await providerOf(ref.account).getThread(ref, args.format));
       }),
   );
 

@@ -44,6 +44,13 @@ export interface MessageDetail extends MessageSummary {
   truncated: boolean;
 }
 
+export interface ThreadPage {
+  /** In chronological order: the newest THREAD_MESSAGE_LIMIT messages of the thread. */
+  messages: MessageDetail[];
+  /** How many older messages of the thread were left out. */
+  olderOmitted: number;
+}
+
 export interface SearchPage {
   total: number;
   messages: MessageSummary[];
@@ -64,7 +71,7 @@ export interface MailProvider {
   readonly account: Account;
   search(query: string, offset: number, limit: number): Promise<SearchPage>;
   getMessage(ref: MessageRef, format: BodyFormat): Promise<MessageDetail>;
-  getThread(ref: ThreadRef, format: BodyFormat): Promise<MessageDetail[]>;
+  getThread(ref: ThreadRef, format: BodyFormat): Promise<ThreadPage>;
   downloadAttachment(ref: MessageRef, attachmentId: string): Promise<AttachmentContent>;
   listLabels(): Promise<LabelInfo[]>;
   listDrafts(offset: number, limit: number): Promise<SearchPage>;
