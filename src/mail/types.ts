@@ -13,6 +13,8 @@ export interface MessageSummary {
   mailbox: string;
   /** ISO 8601, from the Date header or else the server's internal date. */
   date: string | null;
+  /** ISO 8601 server internal date (when the mailbox received it); results are ordered by it. */
+  receivedAt: string | null;
   from: Address[];
   to: Address[];
   cc: Address[];

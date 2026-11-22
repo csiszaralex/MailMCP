@@ -15,8 +15,9 @@ export interface AggregateResult {
   errors: AccountError[];
 }
 
+/** Compares server receive dates: the sender's Date header can be set to anything. */
 function newer(a: MessageSummary, b: MessageSummary): boolean {
-  return (a.date ?? '').localeCompare(b.date ?? '') > 0;
+  return (a.receivedAt ?? '').localeCompare(b.receivedAt ?? '') > 0;
 }
 
 interface Lane {

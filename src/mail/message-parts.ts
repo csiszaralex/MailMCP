@@ -9,11 +9,20 @@ export function toAddresses(list: MessageAddressObject[] | undefined): Address[]
   );
 }
 
-export function messageDate(msg: FetchMessageObject): string | null {
-  const value = msg.envelope?.date ?? msg.internalDate;
+function isoDate(value: Date | string | undefined): string | null {
   if (value === undefined) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** For display: the sender's Date header, else the server's internal date. */
+export function messageDate(msg: FetchMessageObject): string | null {
+  return isoDate(msg.envelope?.date ?? msg.internalDate);
+}
+
+/** For ordering: the server's internal (receive) date, which the sender cannot set. */
+export function receivedDate(msg: FetchMessageObject): string | null {
+  return isoDate(msg.internalDate);
 }
 
 export function collectAttachments(

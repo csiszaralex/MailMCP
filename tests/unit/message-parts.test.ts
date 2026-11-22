@@ -3,6 +3,7 @@ import type { FetchMessageObject, MessageStructureObject } from 'imapflow';
 import {
   collectAttachments,
   messageDate,
+  receivedDate,
   textParts,
   threadRootId,
   toAddresses,
@@ -34,6 +35,16 @@ describe('messageDate', () => {
       '2026-11-11T09:00:00.000Z',
     );
     expect(messageDate(base as FetchMessageObject)).toBeNull();
+  });
+});
+
+describe('receivedDate', () => {
+  it('uses only the server internal date', () => {
+    const base = { seq: 1, uid: 1, envelope: { date: new Date('2030-01-01T00:00:00Z') } };
+    expect(receivedDate({ ...base, internalDate: new Date('2026-11-11T09:00:00Z') })).toBe(
+      '2026-11-11T09:00:00.000Z',
+    );
+    expect(receivedDate(base)).toBeNull();
   });
 });
 

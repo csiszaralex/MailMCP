@@ -19,6 +19,7 @@ import {
 import {
   collectAttachments,
   messageDate,
+  receivedDate,
   textParts,
   threadRootId,
   toAddresses,
@@ -336,6 +337,7 @@ export class ImapMailProvider implements MailProvider {
       account: this.account.id,
       mailbox: path,
       date: messageDate(msg),
+      receivedAt: receivedDate(msg),
       from: toAddresses(msg.envelope?.from),
       to: toAddresses(msg.envelope?.to),
       cc: toAddresses(msg.envelope?.cc),

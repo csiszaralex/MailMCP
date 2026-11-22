@@ -5,13 +5,20 @@ import { decodeCursor } from '../../src/ids.js';
 import type { MailProvider, MessageSummary, SearchPage } from '../../src/mail/types.js';
 import type { Account } from '../../src/config/types.js';
 
-function summary(account: string, n: number, date: string | null): MessageSummary {
+/** receivedAt is the merge key; the header date defaults to it. */
+function summary(
+  account: string,
+  n: number,
+  receivedAt: string | null,
+  date: string | null = receivedAt,
+): MessageSummary {
   return {
     id: `${account}-${String(n)}`,
     threadId: `t-${account}-${String(n)}`,
     account,
     mailbox: 'INBOX',
     date,
+    receivedAt,
     from: [],
     to: [],
     cc: [],
@@ -78,6 +85,16 @@ describe('searchAccounts', () => {
       token = result.nextPageToken;
     }
     expect([...seen].sort()).toEqual(['a-1', 'a-2', 'a-3', 'b-1', 'b-2']);
+  });
+
+  it('merges by the server receive date, not the sender-controlled Date header', async () => {
+    const spoofed = provider('a', [
+      summary('a', 1, '2026-11-20T00:00:00Z', '2030-01-01T00:00:00Z'),
+    ]);
+    const honest = provider('b', [summary('b', 1, '2026-11-21T00:00:00Z')]);
+    const result = await searchAccounts([spoofed, honest], '', 2, undefined);
+    expect(result.messages.map((m) => m.id)).toEqual(['b-1', 'a-1']);
+    expect(result.messages[1]?.date).toBe('2030-01-01T00:00:00Z');
   });
 
   it('reports a failing account and still returns the others', async () => {

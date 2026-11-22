@@ -34,6 +34,7 @@ describe('search', () => {
       'Re: Invoice 2026-11',
       'Invoice 2026-11',
     ]);
+    expect(page.messages[0]?.receivedAt).toBe('2026-11-12T10:00:00.000Z');
   });
 
   it('pages with offset and limit', async () => {
