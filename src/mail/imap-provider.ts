@@ -13,6 +13,7 @@ import {
   RAW_LIMIT_BYTES,
   renderText,
   TEXT_PART_LIMIT_BYTES,
+  type RenderedBody,
   type TextPart,
 } from './body.js';
 import {
@@ -290,7 +291,9 @@ export class ImapMailProvider implements MailProvider {
         inReplyTo: msg.envelope?.inReplyTo ?? null,
         attachments: collectAttachments(msg.bodyStructure),
         format,
-        body: format === 'metadata' ? null : await this.#body(client, msg, format),
+        ...(format === 'metadata'
+          ? { body: null, truncated: false }
+          : await this.#body(client, msg, format)),
       });
     }
     return details;
@@ -300,7 +303,7 @@ export class ImapMailProvider implements MailProvider {
     client: ImapClient,
     msg: FetchMessageObject,
     format: 'plain' | 'html' | 'raw',
-  ): Promise<string> {
+  ): Promise<RenderedBody> {
     if (format === 'raw') {
       assertRawSize(msg.size ?? 0);
       const full = await client.fetchOne(
@@ -309,7 +312,7 @@ export class ImapMailProvider implements MailProvider {
         { uid: true },
       );
       if (full === false || full.source === undefined) throw messageGone();
-      return rawBody(full.source);
+      return { body: rawBody(full.source), truncated: false };
     }
     const parts: TextPart[] = [];
     for (const ref of textParts(msg.bodyStructure, format)) {

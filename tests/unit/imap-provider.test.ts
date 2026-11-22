@@ -98,6 +98,7 @@ describe('ImapMailProvider body download', () => {
     const fake = fakeServer([4]);
     const detail = await providerFor(fake).getMessage(REF, 'plain');
     expect(detail.body?.trim()).toBe('Hello text');
+    expect(detail.truncated).toBe(false);
     expect(fake.fetchQueries.every((q) => q.source === undefined)).toBe(true);
     expect(fake.downloads).toEqual([{ uid: '4', part: '1' }]);
   });

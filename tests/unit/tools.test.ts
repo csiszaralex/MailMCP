@@ -36,6 +36,7 @@ function fakeProvider(acc: Account): MailProvider {
     attachments: [],
     format: 'plain',
     body: 'Body text',
+    truncated: false,
   };
   return {
     account: acc,

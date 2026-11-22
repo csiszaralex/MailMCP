@@ -17,21 +17,24 @@ const HTML = part('text/html', '<p>Hello <b>html</b></p>');
 
 describe('renderText', () => {
   it('returns the plain part', async () => {
-    expect((await renderText([PLAIN], 'plain')).trim()).toBe('Hello plain');
+    expect((await renderText([PLAIN], 'plain')).body.trim()).toBe('Hello plain');
   });
 
   it('returns the html part', async () => {
-    expect(await renderText([HTML], 'html')).toContain('<b>html</b>');
+    expect((await renderText([HTML], 'html')).body).toContain('<b>html</b>');
   });
 
   it('falls back to textAsHtml when html is requested on a plain-only message', async () => {
-    const html = await renderText([PLAIN], 'html');
+    const { body: html } = await renderText([PLAIN], 'html');
     expect(html).not.toBe('');
     expect(html).toContain('Hello plain');
   });
 
   it('derives plain text from an html-only message', async () => {
-    const text = await renderText([part('text/html', '<p>Lunch at <b>noon</b>?</p>')], 'plain');
+    const { body: text } = await renderText(
+      [part('text/html', '<p>Lunch at <b>noon</b>?</p>')],
+      'plain',
+    );
     expect(text).toContain('noon');
     expect(text).not.toContain('<b>');
   });
@@ -43,17 +46,19 @@ describe('renderText', () => {
       content: Buffer.from([0x50, 0xf5, 0x7a]),
       cut: false,
     };
-    expect((await renderText([latin1], 'plain')).trim()).toBe('Pőz');
+    expect((await renderText([latin1], 'plain')).body.trim()).toBe('Pőz');
   });
 
-  it('truncates very long bodies', async () => {
-    const body = await renderText([part('text/plain', 'a'.repeat(MAX_BODY_CHARS + 10))], 'plain');
-    expect(body.endsWith('[truncated]')).toBe(true);
+  it('caps bodies at 100k characters and flags them as truncated', async () => {
+    expect(MAX_BODY_CHARS).toBe(100_000);
+    const long = await renderText([part('text/plain', 'a'.repeat(MAX_BODY_CHARS + 10))], 'plain');
+    expect(long).toEqual({ body: 'a'.repeat(MAX_BODY_CHARS), truncated: true });
+    expect(await renderText([PLAIN], 'plain')).toMatchObject({ truncated: false });
   });
 
-  it('marks a body whose part was cut at the download limit', async () => {
-    const body = await renderText([part('text/plain', 'start of a long part', true)], 'plain');
-    expect(body.endsWith('[truncated]')).toBe(true);
+  it('flags a body whose part was cut at the download limit', async () => {
+    const cut = await renderText([part('text/plain', 'start of a long part', true)], 'plain');
+    expect(cut).toEqual({ body: 'start of a long part', truncated: true });
   });
 });
 

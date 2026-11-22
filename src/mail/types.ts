@@ -40,6 +40,8 @@ export interface MessageDetail extends MessageSummary {
   format: BodyFormat;
   /** null for the metadata format. */
   body: string | null;
+  /** The body was cut to a length limit; get the raw format for the whole message. */
+  truncated: boolean;
 }
 
 export interface SearchPage {

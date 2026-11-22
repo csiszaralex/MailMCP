@@ -3,7 +3,8 @@ import { MailError } from '../errors.js';
 import type { TextType } from './message-parts.js';
 
 export const RAW_LIMIT_BYTES = 5 * 1024 * 1024;
-export const MAX_BODY_CHARS = 1_000_000;
+/** Longest body a tool returns; get_thread returns up to THREAD_MESSAGE_LIMIT of them. */
+export const MAX_BODY_CHARS = 100_000;
 /** Decoded bytes read from one text part; a longer part is cut and the body marked truncated. */
 export const TEXT_PART_LIMIT_BYTES = 2 * 1024 * 1024;
 
@@ -43,14 +44,19 @@ async function renderPart(part: TextPart, format: 'plain' | 'html'): Promise<str
   return typeof parsed.html === 'string' ? parsed.html : (parsed.textAsHtml ?? '');
 }
 
+export interface RenderedBody {
+  body: string;
+  /** The body was cut at MAX_BODY_CHARS or a part at TEXT_PART_LIMIT_BYTES. */
+  truncated: boolean;
+}
+
 export async function renderText(
   parts: readonly TextPart[],
   format: 'plain' | 'html',
-): Promise<string> {
+): Promise<RenderedBody> {
   const rendered: string[] = [];
   for (const part of parts) rendered.push(await renderPart(part, format));
   const body = rendered.join('\n');
-  const cut = parts.some((part) => part.cut);
-  if (body.length > MAX_BODY_CHARS) return `${body.slice(0, MAX_BODY_CHARS)}\n[truncated]`;
-  return cut ? `${body}\n[truncated]` : body;
+  if (body.length > MAX_BODY_CHARS) return { body: body.slice(0, MAX_BODY_CHARS), truncated: true };
+  return { body, truncated: parts.some((part) => part.cut) };
 }
