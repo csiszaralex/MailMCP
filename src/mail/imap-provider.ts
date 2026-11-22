@@ -67,7 +67,7 @@ export class ImapMailProvider implements MailProvider {
   async getMessage(ref: MessageRef, format: BodyFormat): Promise<MessageDetail> {
     this.#assertOwn(ref.account);
     return this.pool.use(this.account, (client) =>
-      this.#withMailbox(client, ref.mailbox, async (uidValidity) => {
+      this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
         if (uidValidity !== ref.uidValidity) {
           throw new MailError(
             'stale_id',
@@ -108,7 +108,7 @@ export class ImapMailProvider implements MailProvider {
           ],
         };
       }
-      return this.#withMailbox(client, path, async (uidValidity) => {
+      return this.#withMailbox(client, path, 'id', async (uidValidity) => {
         const uids = sortedUids(await client.search(criteria, { uid: true }), 'asc').slice(
           0,
           THREAD_MESSAGE_LIMIT,
@@ -124,7 +124,7 @@ export class ImapMailProvider implements MailProvider {
   async downloadAttachment(ref: MessageRef, attachmentId: string): Promise<AttachmentContent> {
     this.#assertOwn(ref.account);
     return this.pool.use(this.account, (client) =>
-      this.#withMailbox(client, ref.mailbox, async (uidValidity) => {
+      this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
         if (uidValidity !== ref.uidValidity) {
           throw new MailError('stale_id', 'This message id is outdated; search again.');
         }
@@ -195,16 +195,33 @@ export class ImapMailProvider implements MailProvider {
     return { path, criteria: translated.criteria };
   }
 
+  /** `from` says where the path came from, so a missing mailbox gets the right hint. */
   async #withMailbox<T>(
     client: ImapClient,
     path: string,
+    from: 'query' | 'id',
     fn: (uidValidity: string) => Promise<T>,
   ): Promise<T> {
-    const lock = await client.getMailboxLock(path, { readOnly: true });
+    let lock;
+    try {
+      lock = await client.getMailboxLock(path, { readOnly: true });
+    } catch (err) {
+      // imapflow sets mailboxMissing when SELECT/EXAMINE failed and LIST does not show the path.
+      if (err instanceof Error && 'mailboxMissing' in err && err.mailboxMissing === true) {
+        throw new MailError(
+          'mailbox_not_found',
+          from === 'id'
+            ? `The mailbox "${path}" of this id no longer exists, so the id is outdated; search again.`
+            : `Mailbox "${path}" does not exist on this account; use list_labels to see the mailboxes.`,
+          { cause: err },
+        );
+      }
+      throw err;
+    }
     try {
       const mailbox = client.mailbox;
-      if (mailbox === false)
-        throw new MailError('mailbox_not_found', `Mailbox "${path}" could not be opened.`);
+      // Only after the connection dropped right after the lock: not a missing mailbox.
+      if (mailbox === false) throw new Error('No mailbox is selected after the lock.');
       return await fn(mailbox.uidValidity.toString());
     } finally {
       lock.release();
@@ -218,7 +235,7 @@ export class ImapMailProvider implements MailProvider {
     offset: number,
     limit: number,
   ): Promise<SearchPage> {
-    return this.#withMailbox(client, path, async (uidValidity) => {
+    return this.#withMailbox(client, path, 'query', async (uidValidity) => {
       const uids = sortedUids(await client.search(criteria, { uid: true }), 'desc');
       const slice = uids.slice(offset, offset + limit);
       const messages =

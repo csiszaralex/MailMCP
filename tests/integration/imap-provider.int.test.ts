@@ -53,6 +53,12 @@ describe('search', () => {
     expect(await subjects('in:drafts')).toEqual(['Draft note']);
   });
 
+  it('reports a missing mailbox as mailbox_not_found', async () => {
+    await expect(provider.search('in:Archive2', 0, 20)).rejects.toMatchObject({
+      code: 'mailbox_not_found',
+    });
+  });
+
   it('rejects Gmail-only syntax', async () => {
     await expect(provider.search('newer_than:7d', 0, 20)).rejects.toMatchObject({
       code: 'unsupported_query',
@@ -109,6 +115,15 @@ describe('getMessage', () => {
     const result = provider.getMessage(ref, 'plain');
     await expect(result).rejects.toBeInstanceOf(MailError);
     await expect(result).rejects.toMatchObject({ code: 'stale_id' });
+  });
+
+  it('reports an id whose mailbox is gone as mailbox_not_found', async () => {
+    const [first] = (await provider.search('', 0, 1)).messages;
+    if (first === undefined) throw new Error('seed missing');
+    const ref = { ...decodeMessageId(first.id), mailbox: 'Renamed' };
+    await expect(provider.getMessage(ref, 'plain')).rejects.toMatchObject({
+      code: 'mailbox_not_found',
+    });
   });
 
   it('rejects ids of another account', async () => {
