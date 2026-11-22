@@ -74,7 +74,8 @@ Minden más útvonal 404. Hitelesítés nélkül csak az OAuth metaadat, az auth
 ### Kapcsolatok és azonosítók
 
 - Az IMAP kapcsolat igény szerint nyílik, és kb. 60 másodperc tétlenség után bezárul.
-- Az üzenetazonosító átlátszatlan szöveg, amely kódolja a fiókot, a mappát, a UIDVALIDITY értéket és a UID-t; Gmailnél az `X-GM-MSGID`-t. Szerver újraindítás után is feloldható.
+- Az üzenetazonosító átlátszatlan szöveg, amely kódolja a fiókot, a mappát, a UIDVALIDITY értéket és a UID-t. Gmailnél is ugyanez a formátum, a mappa ott a `\All` speciális mappa („Összes levél”, a felület nyelvétől függő néven); így egyetlen azonosító formátum van. Szerver újraindítás után is feloldható.
+- A szálazonosító Gmailnél az `X-GM-THRID`, más fióknál a mappa és a szál gyökerének Message-ID-je (a References fejléc első eleme, ennek hiányában az üzenet saját Message-ID-je).
 - Ha a UIDVALIDITY megváltozott, az azonosító érvénytelen, és az eszköz ezt érthető hibával jelzi (új keresés kell).
 - A többfiókos keresés lapozó tokenje fiókonkénti pozíciókat kódol.
 
@@ -85,8 +86,8 @@ Minden más útvonal 404. Hitelesítés nélkül csak az OAuth metaadat, az auth
 | Eszköz | Szint | Connector megfelelő | Megjegyzés |
 |---|---|---|---|
 | `list_accounts` | read | nincs | fiók-id, cím, típus, szint |
-| `search` | read | `search_threads` | Gmail: teljes Gmail szintaxis (`X-GM-RAW`). Más fiók: részhalmaz (`from:`, `to:`, `subject:`, `after:`, `before:`, `is:unread`, `has:attachment`, szabad szavak) IMAP SEARCH-re fordítva; nem támogatott operátorra hiba. Lapozás, nézetek a connector szerint |
-| `get_thread` | read | `get_thread` | Gmail: `X-GM-THRID`. Más: IMAP `THREAD=REFERENCES`, ennek hiányában a References és In-Reply-To fejlécek alapján |
+| `search` | read | `search_threads` | Üzeneteket ad vissza (legújabb elöl), mindegyiknél `threadId`-val; a teljes beszélgetést a `get_thread` adja. Snippet nincs, mert minden találat törzsét le kellene tölteni. Nézetek: `ids`, `metadata`, `minimal` (alapértelmezett, tárggyal). Gmail: teljes Gmail szintaxis (`X-GM-RAW`) az „Összes levél” mappában. Más fiók: részhalmaz IMAP SEARCH-re fordítva: `from:`, `to:`, `cc:`, `subject:`, `after:`, `before:`, `is:unread`/`read`/`starred`/`unstarred`, `has:attachment` (közelítés a `multipart/mixed` tartalomtípussal, mert az IMAP SEARCH mellékletre nem szűr), `in:` (mappa; alapból az INBOX), a szabad szavak egy kifejezésként. Egy operátor legfeljebb egyszer szerepelhet; minden másra (OR, `-`, zárójel, ismeretlen operátor) hiba. Lapozás `pageToken`-nel |
+| `get_thread` | read | `get_thread` | Gmail: `X-GM-THRID` az „Összes levél” mappában. Más: a mappában a gyökér Message-ID-re és a rá hivatkozó References fejlécekre keres (az IMAP THREAD kiterjesztés nem kell, és az imapflow nem is támogatja) |
 | `get_message` | read | `get_message` | plain, html, metadata, raw |
 | `download_attachment` | read | `download_gmail_attachment` | max. 12 MB |
 | `list_labels` | read | `list_labels` | Gmail címkék, illetve IMAP mappák |
