@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+
+# local runtime config with real addresses; only accounts.example.yaml is committed
+accounts.yaml
+.env
+.env.*
+
+# subagent-driven-development workspace
+.superpowers/
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
