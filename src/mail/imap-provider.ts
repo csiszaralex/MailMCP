@@ -9,10 +9,10 @@ import type { ImapPool } from '../imap/pool.js';
 import { translateQuery } from '../search/query.js';
 import {
   assertRawSize,
+  BODY_TEXT_LIMIT_BYTES,
   rawBody,
   RAW_LIMIT_BYTES,
   renderText,
-  TEXT_PART_LIMIT_BYTES,
   type RenderedBody,
   type TextPart,
 } from './body.js';
@@ -319,20 +319,24 @@ export class ImapMailProvider implements MailProvider {
       return { body: rawBody(full.source), truncated: false };
     }
     const parts: TextPart[] = [];
+    let budget = BODY_TEXT_LIMIT_BYTES;
     for (const ref of textParts(msg.bodyStructure, format)) {
+      if (budget <= 0) {
+        // Budget spent: the remaining parts are not downloaded, the body is truncated.
+        const last = parts.at(-1);
+        if (last !== undefined) last.cut = true;
+        break;
+      }
       const download = await client.download(String(msg.uid), ref.part, {
         uid: true,
-        maxBytes: TEXT_PART_LIMIT_BYTES + 1,
+        maxBytes: budget + 1,
       });
       if (download.content === undefined) continue;
       const data = await buffer(download.content);
-      const cut = data.length > TEXT_PART_LIMIT_BYTES;
-      parts.push({
-        type: ref.type,
-        charset: download.meta.charset,
-        content: cut ? data.subarray(0, TEXT_PART_LIMIT_BYTES) : data,
-        cut,
-      });
+      const cut = data.length > budget;
+      const content = cut ? data.subarray(0, budget) : data;
+      budget -= content.length;
+      parts.push({ type: ref.type, charset: download.meta.charset, content, cut });
     }
     return renderText(parts, format);
   }

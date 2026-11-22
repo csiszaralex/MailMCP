@@ -5,15 +5,18 @@ import type { TextType } from './message-parts.js';
 export const RAW_LIMIT_BYTES = 5 * 1024 * 1024;
 /** Longest body a tool returns; get_thread returns up to THREAD_MESSAGE_LIMIT of them. */
 export const MAX_BODY_CHARS = 100_000;
-/** Decoded bytes read from one text part; a longer part is cut and the body marked truncated. */
-export const TEXT_PART_LIMIT_BYTES = 2 * 1024 * 1024;
+/**
+ * Decoded bytes read from all text parts of one message together; the part that reaches it is
+ * cut, later parts are not downloaded, and the body is marked truncated.
+ */
+export const BODY_TEXT_LIMIT_BYTES = 2 * 1024 * 1024;
 
 /** One downloaded text part, transfer encoding already removed. */
 export interface TextPart {
   type: TextType;
   charset: string | undefined;
   content: Buffer;
-  /** The part was longer than TEXT_PART_LIMIT_BYTES and content holds only its start. */
+  /** The message's text budget (BODY_TEXT_LIMIT_BYTES) ran out in or before this part. */
   cut: boolean;
 }
 
@@ -46,7 +49,7 @@ async function renderPart(part: TextPart, format: 'plain' | 'html'): Promise<str
 
 export interface RenderedBody {
   body: string;
-  /** The body was cut at MAX_BODY_CHARS or a part at TEXT_PART_LIMIT_BYTES. */
+  /** The body was cut at MAX_BODY_CHARS or at BODY_TEXT_LIMIT_BYTES. */
   truncated: boolean;
 }
 

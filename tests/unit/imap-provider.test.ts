@@ -11,7 +11,7 @@ import { ImapMailProvider, THREAD_MESSAGE_LIMIT } from '../../src/mail/imap-prov
 import { ImapPool } from '../../src/imap/pool.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
-import { RAW_LIMIT_BYTES } from '../../src/mail/body.js';
+import { BODY_TEXT_LIMIT_BYTES, RAW_LIMIT_BYTES } from '../../src/mail/body.js';
 
 const ACCOUNT: Account = {
   id: 'work',
@@ -47,14 +47,19 @@ interface Fake {
   downloads: { uid: string; part: string }[];
 }
 
-function fakeServer(uids: number[], searchResult: number[] | false = uids): Fake {
+function fakeServer(
+  uids: number[],
+  searchResult: number[] | false = uids,
+  structure: MessageStructureObject = STRUCTURE,
+  partText = 'Hello text\n',
+): Fake {
   const fetchQueries: FetchQueryObject[] = [];
   const downloads: { uid: string; part: string }[] = [];
   const message = (uid: number): FetchMessageObject => ({
     seq: uid,
     uid,
     size: 30 * 1024 * 1024 + 500,
-    bodyStructure: STRUCTURE,
+    bodyStructure: structure,
     envelope: { subject: `mail ${String(uid)}`, messageId: `<m${String(uid)}@example.org>` },
   });
   const client = {
@@ -76,7 +81,7 @@ function fakeServer(uids: number[], searchResult: number[] | false = uids): Fake
       downloads.push({ uid, part });
       const result: DownloadObject = {
         meta: { contentType: 'text/plain', charset: 'utf-8' },
-        content: Readable.from([Buffer.from('Hello text\n')]),
+        content: Readable.from([Buffer.from(partText)]),
       };
       return Promise.resolve(result);
     },
@@ -180,5 +185,19 @@ describe('ImapMailProvider raw threads', () => {
     await expect(result).rejects.toMatchObject({ code: 'unsupported_format' });
     await expect(result).rejects.toThrow('get_message');
     expect(fake.fetchQueries).toEqual([]);
+  });
+});
+
+describe('ImapMailProvider text budget', () => {
+  it('stops downloading text parts once the message budget is spent', async () => {
+    const manyParts: MessageStructureObject = {
+      type: 'multipart/mixed',
+      childNodes: ['1', '2', '3'].map((part) => ({ part, type: 'text/plain' })),
+    };
+    const partText = 'a'.repeat(Math.ceil(BODY_TEXT_LIMIT_BYTES * 0.6));
+    const fake = fakeServer([4], [4], manyParts, partText);
+    const detail = await providerFor(fake).getMessage(REF, 'plain');
+    expect(fake.downloads.map((d) => d.part)).toEqual(['1', '2']);
+    expect(detail.truncated).toBe(true);
   });
 });
