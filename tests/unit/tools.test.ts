@@ -27,7 +27,7 @@ function summary(acc: string): MessageSummary {
     mailbox: 'INBOX',
     date: '2026-11-20T00:00:00.000Z',
     receivedAt: '2026-11-20T00:00:00.000Z',
-    from: [{ name: 'Bob', address: 'bob@x.org' }],
+    from: [{ name: 'Bob', address: 'bob@example.org' }],
     to: [],
     cc: [],
     subject: `hello from ${acc}`,

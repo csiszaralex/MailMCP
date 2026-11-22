@@ -13,13 +13,13 @@ describe('toAddresses', () => {
   it('keeps entries with an address and defaults the name', () => {
     expect(
       toAddresses([
-        { name: 'Bob', address: 'bob@x.org' },
-        { address: 'c@x.org' },
+        { name: 'Bob', address: 'bob@example.org' },
+        { address: 'c@example.org' },
         { name: 'nobody' },
       ]),
     ).toEqual([
-      { name: 'Bob', address: 'bob@x.org' },
-      { name: '', address: 'c@x.org' },
+      { name: 'Bob', address: 'bob@example.org' },
+      { name: '', address: 'c@example.org' },
     ]);
     expect(toAddresses(undefined)).toEqual([]);
   });
@@ -119,12 +119,12 @@ describe('collectAttachments with an attached message', () => {
 
 describe('threadRootId', () => {
   it('uses the first References entry', () => {
-    const headers = Buffer.from('References: <root@x.org>\r\n <mid@x.org>\r\n\r\n');
-    expect(threadRootId(headers, '<own@x.org>')).toBe('<root@x.org>');
+    const headers = Buffer.from('References: <root@example.org>\r\n <mid@example.org>\r\n\r\n');
+    expect(threadRootId(headers, '<own@example.org>')).toBe('<root@example.org>');
   });
 
   it('falls back to the own Message-ID', () => {
-    expect(threadRootId(Buffer.from('\r\n'), '<own@x.org>')).toBe('<own@x.org>');
+    expect(threadRootId(Buffer.from('\r\n'), '<own@example.org>')).toBe('<own@example.org>');
     expect(threadRootId(undefined, undefined)).toBeUndefined();
   });
 });

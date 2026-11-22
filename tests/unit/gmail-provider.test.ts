@@ -15,8 +15,8 @@ import { decodeThreadId } from '../../src/ids.js';
 const ACCOUNT: Account = {
   id: 'personal',
   owner: 'alex',
-  address: 'someone@gmail.com',
-  username: 'someone@gmail.com',
+  address: 'personal@example.com',
+  username: 'personal@example.com',
   provider: 'gmail',
   level: 'read',
   signature: undefined,

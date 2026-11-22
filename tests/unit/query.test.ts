@@ -23,11 +23,11 @@ describe('translateQuery', () => {
 
   it('maps address and subject operators, with quoted values', () => {
     expect(
-      translateQuery('from:bob@example.com subject:"quarterly report" cc:c@x.org').criteria,
+      translateQuery('from:bob@example.com subject:"quarterly report" cc:c@example.org').criteria,
     ).toEqual({
       from: 'bob@example.com',
       subject: 'quarterly report',
-      cc: 'c@x.org',
+      cc: 'c@example.org',
     });
   });
 

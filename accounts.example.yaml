@@ -3,7 +3,7 @@
 owner: alex
 accounts:
   - id: personal # [a-z0-9-], used in the URL: /mcp/personal
-    address: someone@gmail.com
+    address: personal@example.com # your Gmail or Google Workspace address
     provider: gmail # IMAP/SMTP hosts are filled in automatically
     level: send # read | draft | send
     signature: |

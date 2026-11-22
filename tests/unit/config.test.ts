@@ -6,7 +6,7 @@ const VALID = `
 owner: alex
 accounts:
   - id: personal
-    address: someone@gmail.com
+    address: personal@example.com
     provider: gmail
     level: send
     signature: |
@@ -62,7 +62,7 @@ describe('loadConfig', () => {
     const personal = config.accounts[0];
     expect(personal?.imap).toEqual({ host: 'imap.gmail.com', port: 993 });
     expect(personal?.smtp).toEqual({ host: 'smtp.gmail.com', port: 465 });
-    expect(personal?.username).toBe('someone@gmail.com');
+    expect(personal?.username).toBe('personal@example.com');
     expect(personal).not.toHaveProperty('password');
     expect(JSON.stringify(config.accounts)).not.toContain('p1');
     expect(personal?.owner).toBe('alex');
@@ -102,8 +102,8 @@ describe('loadConfig', () => {
     const yaml = `
 owner: alex
 accounts:
-  - { id: a, address: a@gmail.com, provider: gmail, level: read }
-  - { id: a, address: b@gmail.com, provider: gmail, level: read }
+  - { id: a, address: a@example.com, provider: gmail, level: read }
+  - { id: a, address: b@example.com, provider: gmail, level: read }
 `;
     expectConfigError(
       () => loadConfig(yaml, { MAILMCP_PASSWORD_A: 'x' }),
@@ -115,7 +115,7 @@ accounts:
     const yaml = `
 owner: alex
 accounts:
-  - { id: Work_Box, address: a@gmail.com, provider: gmail, level: read }
+  - { id: Work_Box, address: a@example.com, provider: gmail, level: read }
 `;
     expectConfigError(() => loadConfig(yaml, {}), 'id');
   });
@@ -124,7 +124,7 @@ accounts:
     const yaml = `
 owner: alex
 accounts:
-  - { id: a, address: a@gmail.com, provider: gmail, level: read, tls: false }
+  - { id: a, address: a@example.com, provider: gmail, level: read, tls: false }
 `;
     expectConfigError(() => loadConfig(yaml, { MAILMCP_PASSWORD_A: 'x' }), 'tls');
   });
