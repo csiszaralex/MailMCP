@@ -135,6 +135,16 @@ describe('getMessage', () => {
     });
   });
 
+  it('reports a uid that no longer exists as not_found', async () => {
+    const [first] = (await provider.search('', 0, 1)).messages;
+    if (first === undefined) throw new Error('seed missing');
+    const ref = { ...decodeMessageId(first.id), uid: 999 };
+    await expect(provider.getMessage(ref, 'plain')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(provider.downloadAttachment(ref, '2')).rejects.toMatchObject({
+      code: 'not_found',
+    });
+  });
+
   it('rejects ids of another account', async () => {
     const [first] = (await provider.search('', 0, 1)).messages;
     if (first === undefined) throw new Error('seed missing');
