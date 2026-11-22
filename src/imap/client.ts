@@ -39,8 +39,9 @@ export interface ImapClient {
     part: string,
     options: DownloadOptions,
   ): Promise<DownloadObject | DownloadNotFound>;
+  on(event: 'close', listener: () => void): void;
   /** imapflow emits 'error' after connect too; without a listener Node would crash the process. */
-  on(event: 'close' | 'error', listener: () => void): void;
+  on(event: 'error', listener: (err: Error) => void): void;
   logout(): Promise<void>;
 }
 

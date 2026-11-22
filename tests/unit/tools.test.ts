@@ -187,6 +187,47 @@ describe('tool calls', () => {
     ]);
   });
 
+  it('logs the class of an unexpected failure, never its message', async () => {
+    const failure = Object.assign(new Error('server said: secret text'), {
+      code: 'ECONNRESET',
+      responseStatus: 'NO',
+      serverResponseCode: 'UNAVAILABLE',
+    });
+    const failingDeps: ToolDeps = {
+      providerFor: (id) => ({
+        ...fakeProvider(account(id)),
+        getMessage: () => Promise.reject(failure),
+      }),
+      log: (record) => logs.push(record),
+    };
+    const server = buildMcpServer({ accounts: ACCOUNTS, scopedAccountId: undefined }, failingDeps);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    await client.connect(clientTransport);
+    clients.push(client);
+
+    const id = encodeMessageId({ account: 'a', mailbox: 'INBOX', uidValidity: '1', uid: 1 });
+    await client.callTool({ name: 'get_message', arguments: { messageId: id } });
+    expect(logs[0]).toMatchObject({
+      code: 'internal',
+      error: {
+        name: 'Error',
+        code: 'ECONNRESET',
+        responseStatus: 'NO',
+        serverResponseCode: 'UNAVAILABLE',
+      },
+    });
+    expect(JSON.stringify(logs)).not.toContain('secret');
+  });
+
+  it('logs no error class for expected failures', async () => {
+    const client = await connect('a');
+    const foreign = encodeMessageId({ account: 'b', mailbox: 'INBOX', uidValidity: '1', uid: 1 });
+    await client.callTool({ name: 'get_message', arguments: { messageId: foreign } });
+    expect(logs[0]).toMatchObject({ code: 'unknown_account', error: null });
+  });
+
   it('logs no id for an invalid id', async () => {
     const client = await connect();
     await client.callTool({ name: 'get_message', arguments: { messageId: 'nope!' } });

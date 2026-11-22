@@ -1,5 +1,6 @@
 import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
+import { errorClass, stderrConnectionLogger, type ConnectionLogger } from '../log.js';
 import type { ImapClient, ImapClientFactory } from './client.js';
 
 class PoolEntry {
@@ -8,20 +9,29 @@ class PoolEntry {
   timer: NodeJS.Timeout | undefined;
   readonly client: Promise<ImapClient>;
 
-  constructor(connect: ImapClientFactory, account: Account) {
-    this.client = this.#open(connect, account);
+  constructor(connect: ImapClientFactory, account: Account, logError: ConnectionLogger) {
+    this.client = this.#open(connect, account, logError);
   }
 
-  async #open(connect: ImapClientFactory, account: Account): Promise<ImapClient> {
+  async #open(
+    connect: ImapClientFactory,
+    account: Account,
+    logError: ConnectionLogger,
+  ): Promise<ImapClient> {
     try {
       const client = await connect(account);
-      const markBroken = (): void => {
+      client.on('close', () => {
         this.broken = true;
-      };
-      client.on('close', markBroken);
-      // Required: an unhandled 'error' event would crash the process. The error itself is
-      // dropped on purpose (it may carry server text); the next use reconnects.
-      client.on('error', markBroken);
+      });
+      // Required: an unhandled 'error' event would crash the process. Only the error's class is
+      // logged (its message may carry server text), once per connection; the next use reconnects.
+      let errorLogged = false;
+      client.on('error', (err) => {
+        this.broken = true;
+        if (errorLogged) return;
+        errorLogged = true;
+        logError({ event: 'connection_error', account: account.id, error: errorClass(err) });
+      });
       return client;
     } catch (err) {
       this.broken = true;
@@ -42,6 +52,7 @@ export class ImapPool {
   constructor(
     private readonly connect: ImapClientFactory,
     private readonly idleMs = 60_000,
+    private readonly logError: ConnectionLogger = stderrConnectionLogger,
   ) {}
 
   async use<T>(account: Account, fn: (client: ImapClient) => Promise<T>): Promise<T> {
@@ -77,7 +88,7 @@ export class ImapPool {
       existing.active += 1;
       return existing;
     }
-    const entry = new PoolEntry(this.connect, account);
+    const entry = new PoolEntry(this.connect, account, this.logError);
     entry.active = 1;
     this.#entries.set(account.id, entry);
     return entry;

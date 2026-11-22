@@ -3,6 +3,7 @@ import { ImapPool } from '../../src/imap/pool.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import type { Account } from '../../src/config/types.js';
 import { MailError } from '../../src/errors.js';
+import type { ConnectionErrorRecord } from '../../src/log.js';
 
 const ACCOUNT = { id: 'a', imap: { host: 'h', port: 993 } } as Account;
 
@@ -10,12 +11,12 @@ interface FakeClient {
   client: ImapClient;
   logouts: number;
   emitClose: () => void;
-  emitError: () => void;
+  emitError: (err?: Error) => void;
   setUsable: (usable: boolean) => void;
 }
 
 function fakeClient(): FakeClient {
-  const listeners: Partial<Record<'close' | 'error', () => void>> = {};
+  const listeners: { close?: () => void; error?: (err: Error) => void } = {};
   let usable = true;
   const state = { logouts: 0 };
   const client = {
@@ -23,8 +24,12 @@ function fakeClient(): FakeClient {
       return usable;
     },
     mailbox: false,
-    on(event: 'close' | 'error', listener: () => void) {
-      listeners[event] = listener;
+    on(event: 'close' | 'error', listener: (err: Error) => void) {
+      if (event === 'close') {
+        listeners.close = () => {
+          listener(new Error('closed'));
+        };
+      } else listeners.error = listener;
     },
     logout: () => {
       state.logouts += 1;
@@ -37,7 +42,7 @@ function fakeClient(): FakeClient {
       return state.logouts;
     },
     emitClose: () => listeners.close?.(),
-    emitError: () => listeners.error?.(),
+    emitError: (err = new Error('boom')) => listeners.error?.(err),
     setUsable: (value) => {
       usable = value;
     },
@@ -102,11 +107,37 @@ describe('ImapPool', () => {
   it('survives an error event and reconnects on next use', async () => {
     const fakes = [fakeClient(), fakeClient()];
     const connect = sequence(fakes);
-    const pool = new ImapPool(connect, 60_000);
+    const pool = new ImapPool(connect, 60_000, () => undefined);
     await pool.use(ACCOUNT, () => Promise.resolve());
     expect(() => fakes[0]?.emitError()).not.toThrow();
     await pool.use(ACCOUNT, () => Promise.resolve());
     expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs the class of a connection error once, without its message', async () => {
+    const fake = fakeClient();
+    const records: ConnectionErrorRecord[] = [];
+    const pool = new ImapPool(
+      () => Promise.resolve(fake.client),
+      60_000,
+      (r) => records.push(r),
+    );
+    await pool.use(ACCOUNT, () => Promise.resolve());
+    const failure = Object.assign(new Error('secret server text'), { code: 'ECONNRESET' });
+    fake.emitError(failure);
+    fake.emitError(failure);
+    expect(records).toEqual([
+      {
+        event: 'connection_error',
+        account: 'a',
+        error: {
+          name: 'Error',
+          code: 'ECONNRESET',
+          responseStatus: null,
+          serverResponseCode: null,
+        },
+      },
+    ]);
   });
 
   it('reconnects when the client became unusable during a call', async () => {
