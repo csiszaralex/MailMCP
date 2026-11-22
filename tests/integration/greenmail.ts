@@ -58,7 +58,11 @@ function mail(lines: string[]): Buffer {
   return Buffer.from(lines.join('\r\n'));
 }
 
-/** Seeds INBOX with three messages (uid 1..3) and Drafts with one. */
+/** A 1x1 PNG, enough for mailparser to inline it as a data: URI if asked to. */
+const PIXEL_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+/** Seeds INBOX with three messages (uid 1..3), Drafts with one and Newsletters with one. */
 export async function seed(gm: GreenMail): Promise<void> {
   const client = new ImapFlow({
     host: gm.account.imap.host,
@@ -149,6 +153,36 @@ export async function seed(gm: GreenMail): Promise<void> {
       '',
     ]),
     ['\\Draft'],
+  );
+
+  await client.mailboxCreate('Newsletters');
+  await client.append(
+    'Newsletters',
+    mail([
+      'From: News <news@example.org>',
+      'To: alice@example.com',
+      'Subject: Monthly news',
+      'Date: Fri, 13 Nov 2026 07:00:00 +0000',
+      'Message-ID: <n1@example.org>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/related; boundary="rel"',
+      '',
+      '--rel',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<p><img src="cid:logo@example.org"> News of the month</p>',
+      '--rel',
+      'Content-Type: image/png',
+      'Content-ID: <logo@example.org>',
+      'Content-Disposition: inline',
+      'Content-Transfer-Encoding: base64',
+      '',
+      PIXEL_PNG,
+      '--rel--',
+      '',
+    ]),
+    ['\\Seen'],
+    new Date('2026-11-13T07:00:00Z'),
   );
 
   await client.logout();

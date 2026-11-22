@@ -101,6 +101,14 @@ describe('getMessage', () => {
     expect(detail.body).toContain('<p>Lunch at <b>noon</b>?</p>');
   });
 
+  it('keeps cid links of inline images in html bodies', async () => {
+    const [news] = (await provider.search('in:Newsletters', 0, 1)).messages;
+    if (news === undefined) throw new Error('seed missing');
+    const detail = await provider.getMessage(decodeMessageId(news.id), 'html');
+    expect(detail.body).toContain('src="cid:logo@example.org"');
+    expect(detail.body).not.toContain('data:image');
+  });
+
   it('returns metadata without a body', async () => {
     const [first] = (await provider.search('', 0, 1)).messages;
     if (first === undefined) throw new Error('seed missing');
