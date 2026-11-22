@@ -9,6 +9,22 @@ import { IDLE_CLOSE_MS, type ImapClient, type ImapClientFactory } from './client
  */
 export const AUTH_BACKOFF_MS = 5 * 60_000;
 
+/** RFC 5530 response codes that mark a refusal as temporary: the next call may log in. */
+const TRANSIENT_LOGIN_CODES = new Set(['UNAVAILABLE', 'INUSE', 'LIMIT', 'SERVERBUG']);
+
+/**
+ * imapflow sets authenticationFailed for any tagged NO or BAD to LOGIN/AUTHENTICATE. A BAD is a
+ * protocol error and a NO with a transient code is the server's state, not the password; every
+ * other refusal (AUTHENTICATIONFAILED, or no code at all as GreenMail sends) counts as rejected
+ * credentials, so a server without response codes still gets the back-off.
+ */
+function isCredentialRejection(err: Error): boolean {
+  if (!('authenticationFailed' in err) || err.authenticationFailed !== true) return false;
+  const { responseStatus, serverResponseCode } = errorClass(err);
+  if (responseStatus === 'BAD') return false;
+  return serverResponseCode === null || !TRANSIENT_LOGIN_CODES.has(serverResponseCode);
+}
+
 class PoolEntry {
   active = 0;
   broken = false;
@@ -43,9 +59,7 @@ class PoolEntry {
       return client;
     } catch (err) {
       this.broken = true;
-      // imapflow sets authenticationFailed when the server answers LOGIN or AUTHENTICATE with NO or BAD.
-      this.authFailed =
-        err instanceof Error && 'authenticationFailed' in err && err.authenticationFailed === true;
+      this.authFailed = err instanceof Error && isCredentialRejection(err);
       const reason = err instanceof Error ? err.message : String(err);
       throw new MailError(
         'connection_failed',

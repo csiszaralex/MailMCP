@@ -182,7 +182,11 @@ describe('ImapPool', () => {
 
   it('does not retry a rejected login until the back-off has passed', async () => {
     const fake = fakeClient();
-    const rejected = Object.assign(new Error('Command failed'), { authenticationFailed: true });
+    const rejected = Object.assign(new Error('Command failed'), {
+      authenticationFailed: true,
+      responseStatus: 'NO',
+      serverResponseCode: 'AUTHENTICATIONFAILED',
+    });
     const connect = vi
       .fn<() => Promise<ImapClient>>()
       .mockRejectedValueOnce(rejected)
@@ -199,6 +203,30 @@ describe('ImapPool', () => {
     await vi.advanceTimersByTimeAsync(AUTH_BACKOFF_MS);
     await pool.use(ACCOUNT, () => Promise.resolve());
     expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries at once after a transient login refusal', async () => {
+    for (const refusal of [
+      { responseStatus: 'NO', serverResponseCode: 'UNAVAILABLE' },
+      { responseStatus: 'NO', serverResponseCode: 'INUSE' },
+      { responseStatus: 'BAD' },
+    ]) {
+      const fake = fakeClient();
+      const rejected = Object.assign(new Error('Command failed'), {
+        authenticationFailed: true,
+        ...refusal,
+      });
+      const connect = vi
+        .fn<() => Promise<ImapClient>>()
+        .mockRejectedValueOnce(rejected)
+        .mockResolvedValue(fake.client);
+      const pool = new ImapPool(connect, 60_000);
+      await expect(pool.use(ACCOUNT, () => Promise.resolve())).rejects.toMatchObject({
+        code: 'connection_failed',
+      });
+      await pool.use(ACCOUNT, () => Promise.resolve());
+      expect(connect, JSON.stringify(refusal)).toHaveBeenCalledTimes(2);
+    }
   });
 
   it('closeAll logs out every open connection', async () => {
