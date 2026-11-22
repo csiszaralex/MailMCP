@@ -58,6 +58,28 @@ describe('searchAccounts', () => {
     expect(third.nextPageToken).toBeNull();
   });
 
+  it('keeps each account in its own order, so paging never skips or repeats', async () => {
+    // Provider order is not date order inside an account (late delivery, moved mail).
+    const inverted = provider('a', [
+      summary('a', 1, '2026-11-10T00:00:00Z'),
+      summary('a', 2, '2026-11-20T00:00:00Z'),
+      summary('a', 3, '2026-11-05T00:00:00Z'),
+    ]);
+    const other = provider('b', [
+      summary('b', 1, '2026-11-15T00:00:00Z'),
+      summary('b', 2, '2026-11-01T00:00:00Z'),
+    ]);
+    const seen: string[] = [];
+    let token: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const result = await searchAccounts([inverted, other], '', 2, token);
+      seen.push(...result.messages.map((m) => m.id));
+      if (result.nextPageToken === null) break;
+      token = result.nextPageToken;
+    }
+    expect([...seen].sort()).toEqual(['a-1', 'a-2', 'a-3', 'b-1', 'b-2']);
+  });
+
   it('reports a failing account and still returns the others', async () => {
     const result = await searchAccounts(
       [A, failing('c', new Error('IMAP connection failed'))],
