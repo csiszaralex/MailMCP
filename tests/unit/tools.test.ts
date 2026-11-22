@@ -7,6 +7,7 @@ import type { LogRecord } from '../../src/log.js';
 import type { MailProvider, MessageDetail, MessageSummary } from '../../src/mail/types.js';
 import { encodeMessageId, encodeThreadId } from '../../src/ids.js';
 import { UNTRUSTED_NOTE } from '../../src/tools/result.js';
+import { MailError } from '../../src/errors.js';
 import { PAGE_SIZE_LIMIT } from '../../src/tools/read-tools.js';
 import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../../src/mail/imap-provider.js';
 import { SERVER_INFO } from '../../src/server.js';
@@ -158,6 +159,39 @@ describe('tool calls', () => {
     const parsed = JSON.parse(textOf(result)) as { messages: { account: string }[] };
     expect(parsed.messages.map((m) => m.account).sort()).toEqual(['a', 'b']);
     expect(logs[0]).toMatchObject({ tool: 'search', account: null, outcome: 'ok' });
+  });
+
+  it('reports and logs a search where every account failed as an error', async () => {
+    const failingSearch = (fail: (id: string) => boolean): ToolDeps => ({
+      providerFor: (id) => ({
+        ...fakeProvider(account(id)),
+        search: () =>
+          fail(id)
+            ? Promise.reject(new MailError('connection_failed', `account ${id} is down`))
+            : Promise.resolve({ total: 1, messages: [summary(id)] }),
+      }),
+      log: (record) => logs.push(record),
+    });
+    const callSearch = async (toolDeps: ToolDeps) => {
+      const server = buildMcpServer({ accounts: ACCOUNTS, scopedAccountId: undefined }, toolDeps);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      const client = new Client({ name: 'test', version: '0.0.0' });
+      await client.connect(clientTransport);
+      clients.push(client);
+      return client.callTool({ name: 'search', arguments: {} });
+    };
+
+    const allDown = await callSearch(failingSearch(() => true));
+    expect(allDown.isError).toBe(true);
+    expect(JSON.parse(textOf(allDown))).toMatchObject({
+      errors: [{ account: 'a' }, { account: 'b' }],
+    });
+    expect(logs[0]).toMatchObject({ tool: 'search', outcome: 'error', code: 'connection_failed' });
+
+    const oneDown = await callSearch(failingSearch((id) => id === 'b'));
+    expect(oneDown.isError).toBeFalsy();
+    expect(logs[1]).toMatchObject({ tool: 'search', outcome: 'ok' });
   });
 
   it('shapes results by view', async () => {

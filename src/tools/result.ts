@@ -9,6 +9,20 @@ export function jsonResult(data: object): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
 }
 
+/**
+ * Thrown by a tool to answer with a prepared error result (for example a search where every
+ * account failed): runTool returns `result` and logs the call as an error with `code`.
+ */
+export class ToolFailure extends Error {
+  constructor(
+    readonly code: string,
+    readonly result: CallToolResult,
+  ) {
+    super(code);
+    this.name = 'ToolFailure';
+  }
+}
+
 export async function runTool(
   log: Logger,
   tool: string,
@@ -22,6 +36,11 @@ export async function runTool(
     log({ tool, ...target, outcome: 'ok', code: null, error: null, durationMs: durationMs() });
     return result;
   } catch (err) {
+    if (err instanceof ToolFailure) {
+      const { code } = err;
+      log({ tool, ...target, outcome: 'error', code, error: null, durationMs: durationMs() });
+      return { ...err.result, isError: true };
+    }
     const { code, message } = clientError(err instanceof MailError ? err : undefined);
     log({
       tool,

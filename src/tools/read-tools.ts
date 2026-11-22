@@ -7,7 +7,7 @@ import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../
 import type { Logger, LogTarget } from '../log.js';
 import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../mail/imap-provider.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
-import { jsonResult, runTool, UNTRUSTED_NOTE } from './result.js';
+import { jsonResult, runTool, ToolFailure, UNTRUSTED_NOTE } from './result.js';
 
 export interface ToolScope {
   accounts: readonly Account[];
@@ -150,11 +150,17 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
         args.pageSize,
         args.pageToken,
       );
-      return jsonResult({
+      const payload = jsonResult({
         messages: result.messages.map((m) => shape(m, args.view)),
         nextPageToken: result.nextPageToken,
         errors: result.errors,
       });
+      if (result.errors.length === ids.length) {
+        // Every account failed: an error for the client, logged with the distinct codes.
+        const codes = [...new Set(result.errors.map((e) => e.code))];
+        throw new ToolFailure(codes.join(','), payload);
+      }
+      return payload;
     });
   if (scoped) {
     server.registerTool(
