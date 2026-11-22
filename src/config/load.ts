@@ -11,6 +11,21 @@ export function passwordEnvName(accountId: string): string {
   return `MAILMCP_PASSWORD_${accountId.toUpperCase().replaceAll('-', '_')}`;
 }
 
+export const DEFAULT_PORT = 8787;
+
+/** MAILMCP_PORT: unset means DEFAULT_PORT; anything but a decimal 1-65535 stops the start. */
+export function parsePort(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_PORT;
+  const port = /^\d{1,5}$/.test(value) ? Number(value) : NaN;
+  if (!(port >= 1 && port <= 65535)) {
+    throw new MailError(
+      'config_invalid',
+      `MAILMCP_PORT must be an integer from 1 to 65535, got "${value}".`,
+    );
+  }
+  return port;
+}
+
 function invalid(details: string): MailError {
   return new MailError('config_invalid', `accounts.yaml is invalid:\n${details}`);
 }

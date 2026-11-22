@@ -1,19 +1,24 @@
 import { readFile } from 'node:fs/promises';
 import { serve } from '@hono/node-server';
-import { loadConfig } from './config/load.js';
+import { loadConfig, parsePort } from './config/load.js';
 import { MailError } from './errors.js';
 import { createApp } from './http/app.js';
 import { connectTls } from './imap/client.js';
 import { ImapPool } from './imap/pool.js';
-import { stderrLogger } from './log.js';
+import { errorClass, stderrLogger } from './log.js';
 import { ImapMailProvider } from './mail/imap-provider.js';
 import type { ToolDeps } from './server.js';
 
+const HOSTNAME = '127.0.0.1';
+/** How long shutdown waits for open requests and IMAP logouts before it exits anyway. */
+const SHUTDOWN_GRACE_MS = 5_000;
+
 const accountsFile = process.env.MAILMCP_ACCOUNTS_FILE ?? 'accounts.yaml';
-const port = Number(process.env.MAILMCP_PORT ?? '8787');
 
 let config;
+let port;
 try {
+  port = parsePort(process.env.MAILMCP_PORT);
   config = loadConfig(await readFile(accountsFile, 'utf8'), process.env);
 } catch (err) {
   const message = err instanceof Error ? err.message : 'unknown error';
@@ -32,18 +37,32 @@ const deps: ToolDeps = {
   log: stderrLogger,
 };
 
-const server = serve({
-  fetch: createApp(config.accounts, deps).fetch,
-  hostname: '127.0.0.1',
-  port,
-});
-process.stderr.write(
-  `mailmcp: listening on http://127.0.0.1:${String(port)}/mcp (${String(config.accounts.length)} accounts)\n`,
+const accountCount = config.accounts.length;
+const server = serve(
+  { fetch: createApp(config.accounts, deps).fetch, hostname: HOSTNAME, port },
+  () => {
+    process.stderr.write(
+      `mailmcp: listening on http://${HOSTNAME}:${String(port)}/mcp (${String(accountCount)} accounts)\n`,
+    );
+  },
 );
+server.on('error', (err: Error) => {
+  const { code, name } = errorClass(err);
+  process.stderr.write(`mailmcp: cannot listen on ${HOSTNAME}:${String(port)}: ${code ?? name}\n`);
+  process.exit(1);
+});
 
+let stopping = false;
 const shutdown = (): void => {
-  server.close();
-  void pool.closeAll();
+  if (stopping) return;
+  stopping = true;
+  setTimeout(() => process.exit(1), SHUTDOWN_GRACE_MS).unref();
+  const httpClosed = new Promise<void>((resolve) => {
+    server.close(() => {
+      resolve();
+    });
+  });
+  void Promise.all([httpClosed, pool.closeAll()]).then(() => process.exit(0));
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

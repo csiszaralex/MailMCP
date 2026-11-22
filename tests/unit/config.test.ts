@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig, passwordEnvName } from '../../src/config/load.js';
+import { DEFAULT_PORT, loadConfig, parsePort, passwordEnvName } from '../../src/config/load.js';
 import { MailError } from '../../src/errors.js';
 
 const VALID = `
@@ -40,6 +40,19 @@ function expectConfigError(run: () => void, fragment: string): void {
 describe('passwordEnvName', () => {
   it('upper-cases the id and replaces dashes', () => {
     expect(passwordEnvName('work-box')).toBe('MAILMCP_PASSWORD_WORK_BOX');
+  });
+});
+
+describe('parsePort', () => {
+  it('defaults when unset and accepts a valid port', () => {
+    expect(parsePort(undefined)).toBe(DEFAULT_PORT);
+    expect(parsePort('9000')).toBe(9000);
+  });
+
+  it('rejects anything but an integer from 1 to 65535', () => {
+    for (const bad of ['', 'abc', '0', '65536', '80.5', ' 80', '-1']) {
+      expectConfigError(() => parsePort(bad), 'MAILMCP_PORT');
+    }
   });
 });
 
