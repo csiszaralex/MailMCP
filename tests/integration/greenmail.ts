@@ -65,7 +65,7 @@ function mail(lines: string[]): Buffer {
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-/** Seeds INBOX with three messages (uid 1..3), Drafts with one and Newsletters with one. */
+/** Seeds INBOX with three messages (uid 1..3); Drafts, Newsletters and Forwards with one each. */
 export async function seed(gm: GreenMail): Promise<void> {
   const client = new ImapFlow({
     host: gm.account.imap.host,
@@ -186,6 +186,38 @@ export async function seed(gm: GreenMail): Promise<void> {
     ]),
     ['\\Seen'],
     new Date('2026-11-13T07:00:00Z'),
+  );
+
+  await client.mailboxCreate('Forwards');
+  await client.append(
+    'Forwards',
+    mail([
+      'From: alice@example.com',
+      'To: dave@example.com',
+      'Subject: Fwd: Inner note',
+      'Date: Sat, 14 Nov 2026 08:00:00 +0000',
+      'Message-ID: <f1@example.com>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="fwd"',
+      '',
+      '--fwd',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'See the forwarded mail.',
+      '--fwd',
+      'Content-Type: message/rfc822',
+      'Content-Disposition: attachment; filename="inner.eml"',
+      '',
+      'From: Carol <carol@example.com>',
+      'To: alice@example.com',
+      'Subject: Inner note',
+      'Message-ID: <i1@example.com>',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'Inner body.',
+      '--fwd--',
+      '',
+    ]),
   );
 
   await client.logout();

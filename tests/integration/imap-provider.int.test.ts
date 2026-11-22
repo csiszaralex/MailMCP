@@ -171,6 +171,22 @@ describe('downloadAttachment', () => {
     expect(content.data.toString('utf8')).toBe('fake pdf bytes');
   });
 
+  it('lists an attached mail as one attachment and downloads it', async () => {
+    const [fwd] = (await provider.search('in:Forwards', 0, 1)).messages;
+    if (fwd === undefined) throw new Error('seed missing');
+    const ref = decodeMessageId(fwd.id);
+    const detail = await provider.getMessage(ref, 'plain');
+    expect(detail.body?.trim()).toBe('See the forwarded mail.');
+    expect(detail.attachments).toEqual([
+      expect.objectContaining({ filename: 'inner.eml', mimeType: 'message/rfc822' }),
+    ]);
+    const attachmentId = detail.attachments[0]?.attachmentId ?? '';
+    const content = await provider.downloadAttachment(ref, attachmentId);
+    // GreenMail 2.1.15 answers BODY[2] of a message/rfc822 part with the inner body only
+    // (measured: "Inner body.", no headers); RFC 3501 servers return the whole inner mail.
+    expect(content.data.toString('utf8')).toContain('Inner body.');
+  });
+
   it('reports a missing part', async () => {
     const [invoice] = (await provider.search('has:attachment', 0, 1)).messages;
     if (invoice === undefined) throw new Error('seed missing');

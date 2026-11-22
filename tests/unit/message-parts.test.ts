@@ -73,6 +73,50 @@ describe('collectAttachments', () => {
   });
 });
 
+describe('collectAttachments with an attached message', () => {
+  it('lists the attached message itself, not its inner parts', () => {
+    const tree: MessageStructureObject = {
+      type: 'multipart/mixed',
+      childNodes: [
+        { part: '1', type: 'text/plain', size: 20 },
+        {
+          part: '2',
+          type: 'message/rfc822',
+          disposition: 'attachment',
+          dispositionParameters: { filename: 'forwarded.eml' },
+          size: 5000,
+          childNodes: [
+            {
+              part: '2',
+              type: 'multipart/mixed',
+              childNodes: [
+                { part: '2.1', type: 'text/plain', size: 30 },
+                {
+                  part: '2.2',
+                  type: 'application/pdf',
+                  disposition: 'attachment',
+                  dispositionParameters: { filename: 'inner.pdf' },
+                  size: 900,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          part: '3',
+          type: 'message/rfc822',
+          size: 700,
+          childNodes: [{ part: '3.1', type: 'text/plain' }],
+        },
+      ],
+    };
+    expect(collectAttachments(tree)).toEqual([
+      { attachmentId: '2', filename: 'forwarded.eml', mimeType: 'message/rfc822', size: 5000 },
+      { attachmentId: '3', filename: 'message.eml', mimeType: 'message/rfc822', size: 700 },
+    ]);
+  });
+});
+
 describe('threadRootId', () => {
   it('uses the first References entry', () => {
     const headers = Buffer.from('References: <root@x.org>\r\n <mid@x.org>\r\n\r\n');

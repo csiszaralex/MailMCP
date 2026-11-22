@@ -29,10 +29,21 @@ export function collectAttachments(
   structure: MessageStructureObject | undefined,
 ): AttachmentInfo[] {
   if (structure === undefined) return [];
+  const filename = structure.dispositionParameters?.filename ?? structure.parameters?.name;
+  // An attached mail is one attachment; its own parts belong to it, not to this message.
+  if (structure.type === 'message/rfc822') {
+    return [
+      {
+        attachmentId: structure.part ?? '1',
+        filename: filename ?? 'message.eml',
+        mimeType: structure.type,
+        size: structure.size ?? 0,
+      },
+    ];
+  }
   if (structure.childNodes !== undefined && structure.childNodes.length > 0) {
     return structure.childNodes.flatMap((child) => collectAttachments(child));
   }
-  const filename = structure.dispositionParameters?.filename ?? structure.parameters?.name;
   const isAttachment =
     structure.disposition === 'attachment' ||
     (filename !== undefined && !structure.type.startsWith('text/'));
