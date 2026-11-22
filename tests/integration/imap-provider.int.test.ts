@@ -138,7 +138,9 @@ describe('getMessage', () => {
     const [first] = (await provider.search('', 0, 1)).messages;
     if (first === undefined) throw new Error('seed missing');
     const ref = { ...decodeMessageId(first.id), account: 'other' };
-    await expect(provider.getMessage(ref, 'plain')).rejects.toMatchObject({ code: 'invalid_id' });
+    await expect(provider.getMessage(ref, 'plain')).rejects.toMatchObject({
+      code: 'unknown_account',
+    });
   });
 });
 

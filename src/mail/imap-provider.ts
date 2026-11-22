@@ -165,10 +165,11 @@ export class ImapMailProvider implements MailProvider {
     );
   }
 
+  /** Second line of defense: the tool layer's inScope (read-tools.ts) checks the same with the same code. */
   #assertOwn(accountId: string): void {
     if (accountId !== this.account.id) {
       throw new MailError(
-        'invalid_id',
+        'unknown_account',
         `This id belongs to account "${accountId}", not "${this.account.id}".`,
       );
     }
