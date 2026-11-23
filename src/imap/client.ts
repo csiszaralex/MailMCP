@@ -1,5 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import type {
+  AppendResponseObject,
+  CopyResponseObject,
   DownloadNotFound,
   DownloadObject,
   DownloadOptions,
@@ -7,10 +9,18 @@ import type {
   FetchQueryObject,
   ImapFlowOptions,
   ListResponse,
+  MailboxCreateResponse,
+  MailboxDeleteResponse,
   MailboxLockObject,
   MailboxLockOptions,
   MailboxObject,
+  MailboxRenameResponse,
+  MessageRange,
+  MessageRangeOptions,
   SearchObject,
+  StatusObject,
+  StatusQuery,
+  StoreOptions,
 } from 'imapflow';
 import type { Account, PasswordLookup } from '../config/types.js';
 
@@ -21,6 +31,8 @@ import type { Account, PasswordLookup } from '../config/types.js';
 export interface ImapClient {
   readonly usable: boolean;
   readonly mailbox: MailboxObject | false;
+  /** Active server capabilities: `true` for toggles (UIDPLUS), a number for valued ones (APPENDLIMIT). */
+  readonly capabilities: Map<string, boolean | number>;
   list(): Promise<ListResponse[]>;
   getMailboxLock(path: string, options?: MailboxLockOptions): Promise<MailboxLockObject>;
   search(query: SearchObject, options: { uid: true }): Promise<number[] | false | undefined>;
@@ -39,6 +51,24 @@ export interface ImapClient {
     part: string,
     options: DownloadOptions,
   ): Promise<DownloadObject | DownloadNotFound>;
+  append(
+    path: string,
+    content: string | Buffer | Uint8Array,
+    flags?: string[],
+    idate?: Date | string,
+  ): Promise<AppendResponseObject | false>;
+  messageMove(
+    range: MessageRange,
+    destination: string,
+    options: MessageRangeOptions,
+  ): Promise<CopyResponseObject | false>;
+  messageFlagsAdd(range: MessageRange, flags: string[], options: StoreOptions): Promise<boolean>;
+  messageFlagsRemove(range: MessageRange, flags: string[], options: StoreOptions): Promise<boolean>;
+  messageDelete(range: MessageRange, options: MessageRangeOptions): Promise<boolean>;
+  mailboxCreate(path: string): Promise<MailboxCreateResponse>;
+  mailboxRename(path: string, newPath: string): Promise<MailboxRenameResponse>;
+  mailboxDelete(path: string): Promise<MailboxDeleteResponse>;
+  status(path: string, query: StatusQuery): Promise<StatusObject | false>;
   on(event: 'close', listener: () => void): void;
   /** imapflow emits 'error' after connect too; without a listener Node would crash the process. */
   on(event: 'error', listener: (err: Error) => void): void;
