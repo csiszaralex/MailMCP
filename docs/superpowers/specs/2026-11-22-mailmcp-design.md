@@ -102,7 +102,7 @@ Minden más útvonal 404. Hitelesítés nélkül csak az OAuth metaadat, az auth
 | `untrash` | draft | `untrash_*` | |
 | `mark_spam` | draft | `mark_*_spam` | |
 | `unmark_spam` | draft | `unmark_*_spam` | |
-| `send` | send | `send_message` | új levél vagy piszkozat elküldése (`draftId`), mellékletek összesen 25 MB |
+| `send` | send | `send_message` | új levél vagy piszkozat elküldése (`draftId`), mellékletek összesen 10 MB (D14) |
 | `reply` | send | `reply` | `replyAll` |
 | `forward` | send | `forward` | |
 
@@ -113,6 +113,27 @@ Nem Gmail fióknál a címke a mappának felel meg: `update_labels` mappák köz
 Aláírás: a fiók konfigjából (`signature`), ha az eszközhívás kéri. IMAP-on a Gmail aláírása nem olvasható ki.
 
 Minden eszközleírás jelzi, hogy a levéltartalom nem megbízható adat (prompt injection elleni figyelmeztetés).
+
+### Írás, rendszerezés és küldés (2. fázis döntései, 2026-11-23)
+
+| # | Döntés | Indok |
+|---|---|---|
+| D12 | Küldés és MIME összeállítás a `nodemailer` csomaggal; fájl- és URL-hozzáférése kikapcsolva (`disableFileAccess`, `disableUrlAccess`) | Az imapflow szerzőjének csomagja, saját típusokkal. Kikapcsolt hozzáférés nélkül egy melléklet `path` vagy `href` mezője helyi fájlt olvasna vagy URL-t hívna |
+| D13 | A paraméterek a connectorét követik: `to`, `cc`, `bcc` címlisták, `subject`, `body`, `htmlBody`, `includeSignature`, mellékletek `{content (base64), filename, mimeType, inline}` alakban; inline kép `cid:attN` hivatkozással (N a melléklet sorszáma nullától) | A Claude ugyanúgy hívja, mint a Gmail connectort |
+| D14 | A kimenő mellékletek összesen legfeljebb **10 MB**-osak (a továbbított levél eredeti mellékleteivel együtt), a kérés legfeljebb 16 MiB. **Eltérés a connector 25 MB-jától** | A 25 MB base64-ben kb. 34 MB-os kérés; a JSON, a dekódolt fájlok, a kész levél és a Sent másolat együtt nem fér a 256 MB-os konténerbe (170 MB heap). A Claude a mellékletet tokenekként írja ki, néhány MB fölött úgysem tud küldeni |
+| D15 | Egy író eszköz akkor regisztrálódik, ha a végpont legalább egy fiókjának elég a szintje; az `account` paraméterben csak ezek a fiókok választhatók. Id alapú hívásnál az id fiókjának szintjét is ellenőrzi, hiba: `not_permitted` | Két védelmi vonal, ahogy a fiókhoz kötésnél |
+| D16 | Piszkozat: `create_draft` APPEND a Drafts mappába (`\Draft`, `\Seen`). `update_draft` a connector szerint csak a megadott mezőket írja felül, a mellékleteket nem viszi át; új verziót tölt fel és a régit eltávolítja, ezért **az id megváltozik**, a válasz az újat adja. `delete_draft` a kukába tesz | A `draft` szint minden művelete visszafordítható (a connector véglegesen töröl) |
+| D17 | Végleges eltávolítás (EXPUNGE) csak a piszkozat régi verziójára és az elküldött piszkozatra, és csak UIDPLUS-szal (`UID EXPUNGE`). Áthelyezés csak MOVE kiterjesztéssel. Ha a szerver nem tudja, az eszköz `unsupported_server` hibát ad | UIDPLUS nélkül az imapflow sima EXPUNGE-t küld, ami a mappa minden törlésre jelölt levelét törli, más kliensekéit is; MOVE nélkül az imapflow ugyanezzel emulál |
+| D18 | Küldés SMTP-n: 465 implicit TLS, 587 kötelező STARTTLS, tanúsítványellenőrzés kötelező. Nem Gmail fióknál másolat a Sent mappába (`\Seen`, a Bcc fejléccel); Gmailnél nincs másolat, mert a Gmail SMTP maga menti. Ha az SMTP elfogadta a levelet, de a másolat nem sikerült, a válasz sikeres, figyelmeztetéssel. Piszkozat küldése (`draftId`) után a piszkozat eltávolítódik (D17) | Az SMTP elfogadás után a levél már elment, hibát jelezni félrevezető lenne |
+| D19 | `reply`: `In-Reply-To`, `References`, `Re:` előtag, az eredeti levél idézve (plain: `>` sorok, HTML: `blockquote`). Címzett a `Reply-To`, ennek hiányában a `From`; ha az eredetit mi küldtük, az eredeti címzettjei. `replyAll` a To és Cc címeket is hozzáadja, a saját címek nélkül. `create_draft` a `replyToMessageId`-vel ugyanígy készít választ | A connector `create_draft` is idézi az eredetit |
+| D20 | Saját cím felismerése: kis- és nagybetű és a `+` utáni rész nem számít (`asd+xxx@asd.hu` = `asd@asd.hu`); Gmail fióknál `gmail.com` és `googlemail.com` címeken a felhasználónév pontjai sem, és a két domain azonos | Így kézbesít a Gmail és a legtöbb szerver |
+| D21 | `forward`: a törzs elején a megjegyzés, utána egy „Forwarded message” fejlécblokk (From, Date, Subject, To) és az eredeti szöveg; az eredeti mellékletek átkerülnek (D14 korláton belül). Tárgy: `Fwd:` előtag | A Gmail felületén is így néz ki egy továbbítás |
+| D22 | Címkék nem Gmail fióknál (`update_labels`): `UNREAD` és `STARRED` a `\Seen` és `\Flagged` jelzőre fordul; egy mappa hozzáadása áthelyezés oda; az `INBOX` levétele archiválás az Archive mappába (SPECIAL-USE `\Archive` vagy a `mailboxes.archive` konfig). Más kombináció hibát ad. Gmailnél minden név valódi címke (`X-GM-LABELS`), az `UNREAD` és `STARRED` ott is jelző, és az id nem változik | Az IMAP mappában egy levél egyszerre csak egy helyen lehet |
+| D23 | `manage_label` (`create`, `rename`, `delete`): az INBOX és a speciális mappák nem nevezhetők át és nem törölhetők. Nem Gmail fióknál mappa csak üresen törölhető | Ott a mappa törlése a leveleit is törli; Gmailnél a címke törlése a leveleket megtartja |
+| D24 | `trash`, `untrash`, `mark_spam`, `unmark_spam` üzenetre és szálra, áthelyezéssel a Trash vagy Junk mappába. Visszaállítás Gmailnél az „Összes levél” mappába (a címkék megmaradnak, ahogy a connectorban), más fióknál az INBOX-ba. A válasz az áthelyezett levelek új id-jét adja | Áthelyezés után a régi id (mappa és UID) érvénytelen |
+| D25 | `MAILMCP_DEBUG=1`: az imapflow és a nodemailer protokoll naplója a stderr-re. Levéltartalmat is kiír (a jelszót az imapflow kitakarja), ezért alapból ki van kapcsolva, és csak a lokális (`127.0.0.1`) futásban engedett; a nyilvános telepítés ezzel nem indul el | Hibakereséshez kell, de a valódi fiókok leveleit nem szabad minden futásnál a terminálba írni |
+
+Hibakódok bővülnek: `not_permitted` (a fiók szintje nem engedi), `unsupported_server` (hiányzó UIDPLUS vagy MOVE), `send_failed` (az SMTP szerver elutasította vagy nem érhető el).
 
 ## Konfig és titkok
 
@@ -180,7 +201,7 @@ Kötelező TLS: 993 és 465 implicit TLS, vagy 587 kötelező STARTTLS. A tanús
 
 ### Naplózás
 
-Levéltartalom, jelszó és token soha nem kerül a logba. Minden eszközhívásról egy sor: eszköz, fiók, eredmény, időtartam, üzenetazonosító.
+Levéltartalom, jelszó és token soha nem kerül a logba. Minden eszközhívásról egy sor: eszköz, fiók, eredmény, időtartam, üzenetazonosító. Címzett és tárgy sem. Kivétel csak a lokális hibakereső kapcsoló (D25).
 
 ## Deploy
 
@@ -227,8 +248,14 @@ Tesztlevél csak Alex saját, plusz jeles teszt címére megy (`<cím>+mailmcp-<
 | A bejelentkezés csak `401` válaszra indul `WWW-Authenticate: Bearer resource_metadata=...` fejléccel; a metaadat `resource` mezőjének pontosan egyeznie kell a csatolt URL-lel, útvonallal együtt | [Authentication for connectors](https://claude.com/docs/connectors/building/authentication), [Lazy authentication](https://claude.com/docs/connectors/building/lazy-authentication) (2026-11-22) |
 | Időkorlátok: discovery és token 10 s, refresh 30 s. A Claude legfeljebb 5 perccel lejárat előtt és `401`-re frissít | [Authentication for connectors](https://claude.com/docs/connectors/building/authentication) (2026-11-22) |
 | Az Anthropic kimenő forgalma a `160.79.104.0/21` tartományból jön | ugyanott |
+| A GreenMail 2.1.15 képességei: `IMAP4rev1 LITERAL+ UIDPLUS SORT IDLE MOVE SASL-IR AUTH=XOAUTH2 QUOTA`; SPECIAL-USE nincs, alapból csak INBOX van; APPEND után visszaadja az új UID-t és a UIDVALIDITY-t | `greenmail/standalone:2.1.15` konténer, imapflow `capabilities`, `list()`, `append()` (2026-11-23) |
+| Az imapflow 2.12.2 `messageDelete` UIDPLUS nélkül sima `EXPUNGE`-t küld (a mappa minden `\Deleted` levelét törli), a `messageMove` MOVE nélkül COPY, `\Deleted` és ugyanez az EXPUNGE | `dist/cjs/commands/expunge.js`, `move.js` (2026-11-23) |
+| A nodemailer 10.6.1 ESM csomag saját `.d.ts` típusokkal (a `@types/nodemailer` nem kell); van `disableFileAccess`, `disableUrlAccess`, `keepBcc` | `npm pack nodemailer@10.6.1`, `dist/esm` (2026-11-23) |
+| Az MCP SDK 2.4.0 alapból legfeljebb 4 MiB-os kéréstörzset fogad (`DEFAULT_MAX_REQUEST_BODY_SIZE`), a `maxRequestBodySize` opcióval állítható | `dist/index.mjs` (2026-11-23) |
 
 Nem mérhető most, az átvételi teszten mérjük: hogy a claude.ai (hosztolt) kliens a mi szerverünkkel valóban CIMD-t választ-e, és hogy mindkét kliens küldi-e a `resource` paramétert.
+
+A 2. fázis kézi próbáján mérjük valódi Gmaillel és egy nem Gmail szerverrel: a UIDPLUS és MOVE megléte, hogy a Gmail SMTP valóban menti-e a küldött levelet, hogy a Gmail a Drafts mappából eltávolított piszkozatot törli-e, és hogy a kukából az „Összes levél” mappába áthelyezett levél visszakapja-e a címkéit.
 
 ## Feature requestek (nem része az első verziónak)
 
