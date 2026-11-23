@@ -1,0 +1,18 @@
+# Copy to accounts.yaml (gitignored). Passwords never go here:
+# put one app password per account into .env instead, see .env.example.
+owner: alex
+accounts:
+  - id: personal # [a-z0-9-], used in the URL: /mcp/personal
+    address: personal@example.com # your Gmail or Google Workspace address
+    provider: gmail # IMAP/SMTP hosts are filled in automatically
+    level: send # read | draft | send
+    signature: |
+      Cheers,
+      Alex
+  - id: work
+    address: info@example.org
+    provider: imap
+    imap: { host: mail.example.org, port: 993 }
+    smtp: { host: mail.example.org, port: 465 }
+    level: draft
+    # mailboxes: { junk: Spam } # only if the server lacks SPECIAL-USE flags
