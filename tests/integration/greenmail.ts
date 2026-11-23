@@ -1,7 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { createTransport } from 'nodemailer';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import type { Account } from '../../src/config/types.js';
+import type { Account, MailboxOverrides } from '../../src/config/types.js';
 import type { ImapClientFactory } from '../../src/imap/client.js';
 import type { SmtpSend } from '../../src/smtp/sender.js';
 
@@ -93,6 +93,18 @@ export async function startGreenMail(): Promise<GreenMail> {
   return { container, account, bob, smtpPort, send, connect: connectAs(PASSWORD), connectAs };
 }
 
+/**
+ * Mailbox overrides for writer tests. GreenMail sends no SPECIAL-USE flags, so the overrides keep
+ * the tests independent of imapflow guessing special use from folder names. seed() creates them.
+ */
+export const WRITE_MAILBOXES = {
+  drafts: 'Drafts',
+  sent: 'Sent',
+  trash: 'Trash',
+  junk: 'Junk',
+  archive: 'Archive',
+} satisfies MailboxOverrides;
+
 function mail(lines: string[]): Buffer {
   return Buffer.from(lines.join('\r\n'));
 }
@@ -101,7 +113,10 @@ function mail(lines: string[]): Buffer {
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-/** Seeds INBOX with three messages (uid 1..3); Drafts, Newsletters and Forwards with one each. */
+/**
+ * Seeds INBOX with three messages (uid 1..3); Drafts, Newsletters and Forwards with one each.
+ * Every WRITE_MAILBOXES folder exists; Sent, Trash, Junk and Archive start empty.
+ */
 export async function seed(gm: GreenMail): Promise<void> {
   const client = new ImapFlow({
     host: gm.account.imap.host,
@@ -112,7 +127,7 @@ export async function seed(gm: GreenMail): Promise<void> {
     logger: false,
   });
   await client.connect();
-  await client.mailboxCreate('Drafts');
+  for (const path of Object.values(WRITE_MAILBOXES)) await client.mailboxCreate(path);
 
   await client.append(
     'INBOX',

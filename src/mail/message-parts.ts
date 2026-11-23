@@ -1,4 +1,11 @@
-import type { FetchMessageObject, MessageAddressObject, MessageStructureObject } from 'imapflow';
+import type {
+  FetchMessageObject,
+  FetchQueryObject,
+  MessageAddressObject,
+  MessageStructureObject,
+} from 'imapflow';
+import type { Account } from '../config/types.js';
+import { encodeThreadId } from '../ids.js';
 import type { Address, AttachmentInfo } from './types.js';
 
 export function toAddresses(list: MessageAddressObject[] | undefined): Address[] {
@@ -58,15 +65,39 @@ export function collectAttachments(
   ];
 }
 
+/** The Message-IDs of a fetched References header (`headers: ['references']`), in order. */
+export function referenceIds(headers: Buffer | undefined): string[] {
+  const unfolded = headers?.toString('utf8').replace(/\r?\n[ \t]+/g, ' ') ?? '';
+  const references = /^references:(.*)$/im.exec(unfolded)?.[1];
+  return references === undefined ? [] : (references.match(/<[^<>\s]+>/g) ?? []);
+}
+
 /** The thread root for servers without X-GM-THRID: first References entry, else own Message-ID. */
 export function threadRootId(
   headers: Buffer | undefined,
   ownMessageId: string | undefined,
 ): string | undefined {
-  const unfolded = headers?.toString('utf8').replace(/\r?\n[ \t]+/g, ' ') ?? '';
-  const references = /^references:(.*)$/im.exec(unfolded)?.[1];
-  const first = references === undefined ? undefined : /<[^<>\s]+>/.exec(references)?.[0];
-  return first ?? ownMessageId;
+  return referenceIds(headers)[0] ?? ownMessageId;
+}
+
+/** The fetch fields messageThreadId needs: X-GM-THRID on Gmail, else the envelope and References. */
+export function threadIdFields(account: Account): FetchQueryObject {
+  return account.provider === 'gmail'
+    ? { threadId: true }
+    : { envelope: true, headers: ['references'] };
+}
+
+/** The thread id of a message fetched with threadIdFields. */
+export function messageThreadId(account: Account, path: string, msg: FetchMessageObject): string {
+  if (account.provider === 'gmail' && msg.threadId !== undefined) {
+    return encodeThreadId({ kind: 'gmail', account: account.id, gmailThreadId: msg.threadId });
+  }
+  return encodeThreadId({
+    kind: 'references',
+    account: account.id,
+    mailbox: path,
+    rootMessageId: threadRootId(msg.headers, msg.envelope?.messageId) ?? '',
+  });
 }
 
 export type TextType = 'text/plain' | 'text/html';

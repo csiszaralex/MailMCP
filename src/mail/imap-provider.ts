@@ -2,7 +2,7 @@ import { buffer } from 'node:stream/consumers';
 import type { FetchMessageObject, FetchQueryObject, SearchObject } from 'imapflow';
 import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
-import { encodeMessageId, encodeThreadId, type MessageRef, type ThreadRef } from '../ids.js';
+import { encodeMessageId, type MessageRef, type ThreadRef } from '../ids.js';
 import type { ImapClient } from '../imap/client.js';
 import { resolveMailbox } from '../imap/mailboxes.js';
 import { withMailbox } from '../imap/mailbox-lock.js';
@@ -17,13 +17,15 @@ import {
   type RenderedBody,
   type TextPart,
 } from './body.js';
+import { assertCurrent, assertOwnAccount, messageGone } from './ref-checks.js';
 import { threadLocation } from './thread-locate.js';
 import {
   collectAttachments,
   messageDate,
+  messageThreadId,
   receivedDate,
   textParts,
-  threadRootId,
+  threadIdFields,
   toAddresses,
 } from './message-parts.js';
 import type {
@@ -70,7 +72,7 @@ export class ImapMailProvider implements MailProvider {
 
   // async: a foreign id must reject the returned promise, not throw before one exists.
   async getMessage(ref: MessageRef, format: BodyFormat): Promise<MessageDetail> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     return this.pool.use(this.account, (client) =>
       withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
         assertCurrent(ref, uidValidity);
@@ -82,7 +84,7 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async getThread(ref: ThreadRef, format: BodyFormat): Promise<ThreadPage> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     if (format === 'raw') {
       // Up to THREAD_MESSAGE_LIMIT raw sources of RAW_LIMIT_BYTES each would not fit in memory.
       throw new MailError(
@@ -107,7 +109,7 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async downloadAttachment(ref: MessageRef, attachmentId: string): Promise<AttachmentContent> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     return this.pool.use(this.account, (client) =>
       withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
         assertCurrent(ref, uidValidity);
@@ -152,16 +154,6 @@ export class ImapMailProvider implements MailProvider {
     );
   }
 
-  /** Second line of defense: the tool layer's inScope (read-tools.ts) checks the same with the same code. */
-  #assertOwn(accountId: string): void {
-    if (accountId !== this.account.id) {
-      throw new MailError(
-        'unknown_account',
-        `This id belongs to account "${accountId}", not "${this.account.id}".`,
-      );
-    }
-  }
-
   async #searchTarget(
     client: ImapClient,
     query: string,
@@ -201,7 +193,8 @@ export class ImapMailProvider implements MailProvider {
       envelope: true,
       flags: true,
       internalDate: true,
-      ...(this.#gmail ? { labels: true, threadId: true } : { headers: ['references'] }),
+      ...threadIdFields(this.account),
+      ...(this.#gmail ? { labels: true } : {}),
     };
   }
 
@@ -290,7 +283,7 @@ export class ImapMailProvider implements MailProvider {
   #summary(path: string, uidValidity: string, msg: FetchMessageObject): MessageSummary {
     return {
       id: encodeMessageId({ account: this.account.id, mailbox: path, uidValidity, uid: msg.uid }),
-      threadId: this.#threadId(path, msg),
+      threadId: messageThreadId(this.account, path, msg),
       account: this.account.id,
       mailbox: path,
       date: messageDate(msg),
@@ -303,37 +296,6 @@ export class ImapMailProvider implements MailProvider {
       labels: [...(msg.labels ?? [])],
     };
   }
-
-  #threadId(path: string, msg: FetchMessageObject): string {
-    if (this.#gmail && msg.threadId !== undefined) {
-      return encodeThreadId({
-        kind: 'gmail',
-        account: this.account.id,
-        gmailThreadId: msg.threadId,
-      });
-    }
-    const root = threadRootId(msg.headers, msg.envelope?.messageId) ?? '';
-    return encodeThreadId({
-      kind: 'references',
-      account: this.account.id,
-      mailbox: path,
-      rootMessageId: root,
-    });
-  }
-}
-
-/** A message id names a UID under one UIDVALIDITY; after the server rebuilt the mailbox it is void. */
-function assertCurrent(ref: MessageRef, uidValidity: string): void {
-  if (uidValidity !== ref.uidValidity) {
-    throw new MailError(
-      'stale_id',
-      'This message id is outdated (the mailbox was rebuilt); search again.',
-    );
-  }
-}
-
-function messageGone(): MailError {
-  return new MailError('not_found', 'Message not found; it may have been moved or deleted.');
 }
 
 /** imapflow resolves false when the server answers NO or BAD, and undefined without a mailbox. */
