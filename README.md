@@ -44,7 +44,7 @@ Az URL végén a fiók azonosítója áll. Ezen a címen a szerver csak azt az e
 > Hitelesítés még nincs: a szerver csak a `127.0.0.1` címen figyel. Ne tedd elérhetővé más gépről.
 
 1. `cp accounts.example.yaml accounts.yaml`, és töltsd ki a saját fiókjaiddal (ez a fájl gitignore-olt).
-2. Minden fiókhoz állíts be egy környezeti változót az alkalmazásjelszóval: `MAILMCP_PASSWORD_<ID>` (az id nagybetűvel, a kötőjel aláhúzásra cserélve).
+2. `cp .env.example .env`, és írd be minden fiókhoz az alkalmazásjelszót (ez a fájl is gitignore-olt). A változók nevének szabálya a `.env.example` elején van. Élesben ugyanezek a változók a deploy env fájljából jönnek.
 3. `pnpm install && pnpm dev`
 4. Claude Code-ban: `claude mcp add --transport http mail-local http://127.0.0.1:8787/mcp`, vagy egy fiókhoz: `.../mcp/<fiók-id>`.
 

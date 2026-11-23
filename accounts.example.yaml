@@ -1,5 +1,5 @@
 # Copy to accounts.yaml (gitignored). Passwords never go here:
-# set MAILMCP_PASSWORD_<ID> per account (id upper-cased, dashes become underscores).
+# put one app password per account into .env instead, see .env.example.
 owner: alex
 accounts:
   - id: personal # [a-z0-9-], used in the URL: /mcp/personal

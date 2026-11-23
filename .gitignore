@@ -8,6 +8,7 @@ coverage/
 accounts.yaml
 .env
 .env.*
+!.env.example
 
 # subagent-driven-development workspace
 .superpowers/
