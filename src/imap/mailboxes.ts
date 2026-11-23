@@ -9,6 +9,7 @@ const OVERRIDE_KEY: Record<SpecialUse, keyof MailboxOverrides> = {
   '\\Sent': 'sent',
   '\\Trash': 'trash',
   '\\Junk': 'junk',
+  '\\Archive': 'archive',
 };
 
 export async function resolveMailbox(

@@ -27,6 +27,13 @@ export function parsePort(value: string | undefined): number {
   return port;
 }
 
+/** MAILMCP_DEBUG: unset or 0 is off, 1 is on; anything else stops the start. */
+export function parseDebug(value: string | undefined): boolean {
+  if (value === undefined || value === '0') return false;
+  if (value === '1') return true;
+  throw new MailError('config_invalid', `MAILMCP_DEBUG must be 0 or 1, got "${value}".`);
+}
+
 function invalid(details: string): MailError {
   return new MailError('config_invalid', `accounts.yaml is invalid:\n${details}`);
 }

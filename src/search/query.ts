@@ -1,7 +1,7 @@
 import type { SearchObject } from 'imapflow';
 import { MailError } from '../errors.js';
 
-export type SpecialUse = '\\All' | '\\Drafts' | '\\Sent' | '\\Trash' | '\\Junk';
+export type SpecialUse = '\\All' | '\\Drafts' | '\\Sent' | '\\Trash' | '\\Junk' | '\\Archive';
 
 export type MailboxSelector =
   { kind: 'inbox' } | { kind: 'special'; use: SpecialUse } | { kind: 'path'; path: string };
