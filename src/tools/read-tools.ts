@@ -1,12 +1,12 @@
 import * as z from 'zod';
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { searchAccounts } from '../aggregate/search.js';
 import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../ids.js';
 import type { Logger, LogTarget } from '../log.js';
 import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../mail/imap-provider.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
 import type { MailWriter } from '../mail/write-types.js';
-import { jsonResult, runTool, ToolFailure, UNTRUSTED_NOTE } from './result.js';
+import { jsonResult, toolRunner, ToolFailure, UNTRUSTED_NOTE } from './result.js';
 import {
   accountIdSchema,
   messageTarget,
@@ -43,8 +43,7 @@ export function registerReadTools(server: McpServer, scope: ToolScope, deps: Too
   const scoped = scope.scopedAccountId !== undefined;
   const { inScope, requestedAccount, onlyAccount } = scopeHelpers(scope);
   const providerOf = (accountId: string): MailProvider => deps.providerFor(inScope(accountId).id);
-  const run = (tool: string, target: LogTarget, fn: () => Promise<CallToolResult>) =>
-    runTool(deps.log, tool, target, fn);
+  const run = toolRunner(deps.log);
   const accountTarget = (requested: string | undefined): LogTarget => ({
     account: requestedAccount(requested),
     id: null,

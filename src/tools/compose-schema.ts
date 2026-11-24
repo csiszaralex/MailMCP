@@ -1,10 +1,10 @@
 import * as z from 'zod';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
-import type { OutgoingAttachment } from '../mail/write-types.js';
+import type { Composition, OutgoingAttachment } from '../mail/write-types.js';
 
 // Input fields of the tools that compose mail, worded after Claude's Gmail connector (D13).
 
-const LIMIT_MB = String(OUTGOING_ATTACHMENTS_LIMIT_BYTES / (1024 * 1024));
+export const ATTACHMENT_LIMIT_MB = String(OUTGOING_ATTACHMENTS_LIMIT_BYTES / (1024 * 1024));
 
 export const addressListSchema = z.array(z.email());
 
@@ -28,7 +28,7 @@ export const attachmentSchema = z.object({
 
 type AttachmentInput = z.infer<typeof attachmentSchema>;
 
-export const attachmentsDescription = `Files to attach. Together at most ${LIMIT_MB} MB decoded.`;
+export const attachmentsDescription = `Files to attach. Together at most ${ATTACHMENT_LIMIT_MB} MB decoded.`;
 
 const addresses = (role: string) =>
   addressListSchema.describe(`${role} recipients; each a plain email address (user@example.com).`);
@@ -67,4 +67,20 @@ export function toOutgoing(attachments: AttachmentInput[]): OutgoingAttachment[]
     mimeType: a.mimeType,
     inline: a.inline,
   }));
+}
+
+/** The parsed fields of a new message. */
+export type CompositionInput = z.infer<z.ZodObject<typeof compositionFields>>;
+
+export function toComposition(args: CompositionInput): Composition {
+  return {
+    to: args.to,
+    cc: args.cc,
+    bcc: args.bcc,
+    subject: args.subject,
+    body: args.body,
+    htmlBody: args.htmlBody,
+    attachments: toOutgoing(args.attachments),
+    includeSignature: args.includeSignature,
+  };
 }

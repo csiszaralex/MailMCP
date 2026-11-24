@@ -62,3 +62,9 @@ function loggedClass(err: Error | undefined): ErrorClass | null {
   if (err instanceof MailError) return err.cause instanceof Error ? errorClass(err.cause) : null;
   return errorClass(err);
 }
+
+/** `runTool` bound to a log sink: the `run` every tool registrar uses. */
+export const toolRunner =
+  (log: Logger) =>
+  (tool: string, target: LogTarget, fn: () => Promise<CallToolResult>): Promise<CallToolResult> =>
+    runTool(log, tool, target, fn);

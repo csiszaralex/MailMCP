@@ -1,29 +1,25 @@
 import * as z from 'zod';
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
-import { assertLevel } from '../config/levels.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { MailError } from '../errors.js';
 import { decodeMessageId, decodeThreadId } from '../ids.js';
 import type { LogTarget } from '../log.js';
 import { assertOwnAccount } from '../mail/ref-checks.js';
-import type {
-  Composition,
-  DraftPatch,
-  LabelAction,
-  MailWriter,
-  WriteTarget,
-} from '../mail/write-types.js';
+import type { DraftPatch, LabelAction, WriteTarget } from '../mail/write-types.js';
 import {
   addressListSchema,
   attachmentsDescription,
   attachmentSchema,
   compositionFields,
+  toComposition,
   toOutgoing,
+  type CompositionInput,
 } from './compose-schema.js';
 import type { ToolDeps } from './read-tools.js';
-import { jsonResult, runTool, UNTRUSTED_NOTE } from './result.js';
+import { jsonResult, toolRunner, UNTRUSTED_NOTE } from './result.js';
 import {
   accountIdSchema,
   accountsAllowing,
+  levelWriter,
   messageTarget,
   NO_TARGET,
   scopeHelpers,
@@ -107,14 +103,8 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
   if (allowed.length === 0) return;
   const scoped = scope.scopedAccountId !== undefined;
   const { inScope, requestedAccount, onlyAccount } = scopeHelpers(scope);
-  /** The endpoint scope first (unknown_account), then the level (not_permitted), then the writer. */
-  const writerOf = (accountId: string): MailWriter => {
-    const account = inScope(accountId);
-    assertLevel(account, 'draft');
-    return deps.writerFor(account.id);
-  };
-  const run = (tool: string, target: LogTarget, fn: () => Promise<CallToolResult>) =>
-    runTool(deps.log, tool, target, fn);
+  const writerOf = levelWriter(scope, deps, 'draft');
+  const run = toolRunner(deps.log);
   const accountTarget = (requested: string | undefined): LogTarget => ({
     account: requestedAccount(requested),
     id: null,
@@ -135,30 +125,15 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
     description: `Saves a new draft in the Drafts mailbox; nothing is sent. Returns its draftId and threadId. ${UNTRUSTED_NOTE}`,
     annotations: WRITE,
   };
-  const handleCreateDraft = (args: {
-    to: string[];
-    cc: string[];
-    bcc: string[];
-    subject: string;
-    body?: string | undefined;
-    htmlBody?: string | undefined;
-    attachments: z.infer<typeof attachmentSchema>[];
-    includeSignature: boolean;
-    replyToMessageId?: string | undefined;
-    account?: string | undefined;
-  }) =>
+  const handleCreateDraft = (
+    args: CompositionInput & {
+      replyToMessageId?: string | undefined;
+      account?: string | undefined;
+    },
+  ) =>
     run('create_draft', accountTarget(args.account), async () => {
       const writer = writerOf(onlyAccount(args.account));
-      const composition: Composition = {
-        to: args.to,
-        cc: args.cc,
-        bcc: args.bcc,
-        subject: args.subject,
-        body: args.body,
-        htmlBody: args.htmlBody,
-        attachments: toOutgoing(args.attachments),
-        includeSignature: args.includeSignature,
-      };
+      const composition = toComposition(args);
       const replyTo =
         args.replyToMessageId === undefined ? undefined : decodeMessageId(args.replyToMessageId);
       // The reply id must be on this endpoint and of the draft's own account (D15).

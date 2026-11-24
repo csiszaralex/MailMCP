@@ -1,9 +1,11 @@
 import * as z from 'zod';
-import { levelAllows } from '../config/levels.js';
+import { assertLevel, levelAllows } from '../config/levels.js';
 import type { AccessLevel, Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import { decodeMessageId, decodeThreadId } from '../ids.js';
 import type { LogTarget } from '../log.js';
+import type { MailWriter } from '../mail/write-types.js';
+import type { ToolDeps } from './read-tools.js';
 
 export interface ToolScope {
   accounts: readonly Account[];
@@ -72,5 +74,22 @@ export function scopeHelpers(scope: ToolScope): ScopeHelpers {
       if (id === null) throw new MailError('unknown_account', 'The account parameter is required.');
       return id;
     },
+  };
+}
+
+/**
+ * The writer of an account for a tool that needs `need`: the endpoint scope first (unknown_account),
+ * then the level (not_permitted), then the writer.
+ */
+export function levelWriter(
+  scope: ToolScope,
+  deps: ToolDeps,
+  need: AccessLevel,
+): (accountId: string) => MailWriter {
+  const { inScope } = scopeHelpers(scope);
+  return (accountId) => {
+    const account = inScope(accountId);
+    assertLevel(account, need);
+    return deps.writerFor(account.id);
   };
 }
