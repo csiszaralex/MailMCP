@@ -196,6 +196,24 @@ describe('send', () => {
     ]);
   });
 
+  it('sends a new mail from the account of a per-account endpoint', async () => {
+    // createApp builds /mcp/<id> with exactly this scope.
+    const res = await call(
+      'send',
+      { to: ['bob@example.org'], subject: 'Hi' },
+      scopeOf([acc('c', 'send')], 'c'),
+    );
+    expect(res.isError).toBeFalsy();
+    expect(writerCalls).toEqual([
+      {
+        account: 'c',
+        method: 'send',
+        args: [expect.objectContaining({ to: ['bob@example.org'], subject: 'Hi' }) as object],
+      },
+    ]);
+    expect(logs.map((l) => [l.tool, l.account])).toEqual([['send', 'c']]);
+  });
+
   it('needs a recipient', async () => {
     const res = await call('send', { account: 'c', subject: 'Hi', body: 'x' });
     expect(res.isError).toBe(true);
