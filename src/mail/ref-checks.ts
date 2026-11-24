@@ -2,7 +2,10 @@ import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import type { MessageRef } from '../ids.js';
 
-/** Second line of defense: the tool layer's scopeHelpers().inScope (tools/scope.ts) checks the same with the same code. */
+/**
+ * Second line of defense: the tool layer checks the same first, with the same code: scopeHelpers().inScope
+ * (tools/scope.ts) for every id, and create_draft (tools/write-tools.ts) with this function for its reply id.
+ */
 export function assertOwnAccount(account: Account, accountId: string): void {
   if (accountId !== account.id) {
     throw new MailError(

@@ -1,5 +1,6 @@
 import * as z from 'zod';
-import type { Account } from '../config/types.js';
+import { levelAllows } from '../config/levels.js';
+import type { AccessLevel, Account } from '../config/types.js';
 import { MailError } from '../errors.js';
 import { decodeMessageId, decodeThreadId } from '../ids.js';
 import type { LogTarget } from '../log.js';
@@ -14,6 +15,11 @@ export function accountIdSchema(accounts: readonly Account[]) {
   const [first, ...rest] = accounts.map((a) => a.id);
   if (first === undefined) throw new Error('at least one account is required');
   return z.enum([first, ...rest]).describe('Account id from list_accounts.');
+}
+
+/** The accounts of the scope whose level allows `need` (D15). */
+export function accountsAllowing(scope: ToolScope, need: AccessLevel): Account[] {
+  return scope.accounts.filter((a) => levelAllows(a.level, need));
 }
 
 export const NO_TARGET: LogTarget = { account: null, id: null };

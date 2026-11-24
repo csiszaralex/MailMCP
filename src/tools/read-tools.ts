@@ -5,6 +5,7 @@ import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../
 import type { Logger, LogTarget } from '../log.js';
 import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../mail/imap-provider.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
+import type { MailWriter } from '../mail/write-types.js';
 import { jsonResult, runTool, ToolFailure, UNTRUSTED_NOTE } from './result.js';
 import {
   accountIdSchema,
@@ -15,10 +16,9 @@ import {
   type ToolScope,
 } from './scope.js';
 
-export type { ToolScope };
-
 export interface ToolDeps {
   providerFor(accountId: string): MailProvider;
+  writerFor(accountId: string): MailWriter;
   log: Logger;
 }
 

@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import * as z from 'zod';
 import { McpServer } from '@modelcontextprotocol/server';
 import { parseJsonText } from './boundary.js';
-import { registerReadTools, type ToolDeps, type ToolScope } from './tools/read-tools.js';
+import { registerReadTools, type ToolDeps } from './tools/read-tools.js';
+import type { ToolScope } from './tools/scope.js';
+import { registerWriteTools } from './tools/write-tools.js';
 
 export type { ToolDeps, ToolScope };
 
@@ -17,5 +19,6 @@ export const SERVER_INFO = packageSchema.parse(
 export function buildMcpServer(scope: ToolScope, deps: ToolDeps): McpServer {
   const server = new McpServer(SERVER_INFO);
   registerReadTools(server, scope, deps);
+  registerWriteTools(server, scope, deps);
   return server;
 }

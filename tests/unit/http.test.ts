@@ -15,6 +15,9 @@ const ACCOUNTS = [
 const deps: ToolDeps = {
   providerFor: (id) =>
     ({ account: ACCOUNTS.find((a) => a.id === id) }) as Partial<MailProvider> as MailProvider,
+  writerFor: () => {
+    throw new Error('every account is read-only, so no write tool asks for a writer');
+  },
   log: () => undefined,
 };
 
