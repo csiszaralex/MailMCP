@@ -69,6 +69,38 @@ function tokenize(query: string): string[] {
   return query.match(/[^\s"]*"[^"]*"|\S+/g) ?? [];
 }
 
+/** The Gmail mailboxes that All Mail leaves out, by the in: token that selects them. */
+const GMAIL_EXCLUDED = new Map<string, SpecialUse>([
+  ['in:trash', '\\Trash'],
+  ['in:spam', '\\Junk'],
+]);
+
+export interface GmailSearch {
+  mailbox: SpecialUse;
+  /** The X-GM-RAW text; blank for every message of the mailbox. */
+  gmraw: string;
+}
+
+/**
+ * Gmail searches All Mail, which holds neither the trash nor spam. An in:trash or in:spam token
+ * (any case) selects that mailbox instead and is taken out of the X-GM-RAW text.
+ */
+export function gmailSearch(query: string): GmailSearch {
+  const tokens = tokenize(query);
+  const kept = tokens.filter((token) => !GMAIL_EXCLUDED.has(token.toLowerCase()));
+  const selected = new Set(
+    tokens.flatMap((token) => {
+      const use = GMAIL_EXCLUDED.get(token.toLowerCase());
+      return use === undefined ? [] : [use];
+    }),
+  );
+  const [only, ...more] = selected;
+  if (only === undefined) return { mailbox: '\\All', gmraw: query };
+  if (more.length > 0)
+    throw unsupported('in:trash and in:spam cannot be combined; search one, then the other');
+  return { mailbox: only, gmraw: kept.join(' ') };
+}
+
 function unquote(value: string): string {
   return value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
 }

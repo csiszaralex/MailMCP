@@ -7,7 +7,7 @@ import type { ImapClient } from '../imap/client.js';
 import { resolveMailbox } from '../imap/mailboxes.js';
 import { withMailbox } from '../imap/mailbox-lock.js';
 import type { ImapPool } from '../imap/pool.js';
-import { translateQuery } from '../search/query.js';
+import { gmailSearch, translateQuery } from '../search/query.js';
 import {
   assertRawSize,
   BODY_TEXT_LIMIT_BYTES,
@@ -159,12 +159,13 @@ export class ImapMailProvider implements MailProvider {
     query: string,
   ): Promise<{ path: string; criteria: SearchObject }> {
     if (this.#gmail) {
+      const { mailbox, gmraw } = gmailSearch(query);
       const path = await resolveMailbox(
         client,
-        { kind: 'special', use: '\\All' },
+        { kind: 'special', use: mailbox },
         this.account.mailboxes,
       );
-      return { path, criteria: query.trim() === '' ? { all: true } : { gmraw: query } };
+      return { path, criteria: gmraw.trim() === '' ? { all: true } : { gmraw } };
     }
     const translated = translateQuery(query);
     const path = await resolveMailbox(client, translated.mailbox, this.account.mailboxes);
