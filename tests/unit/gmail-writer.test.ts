@@ -106,7 +106,7 @@ function fakeGmail(capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'], s
 
 function writerFor(
   fake: { client: ImapClient },
-  smtp: SmtpSend = () => Promise.resolve(),
+  smtp: SmtpSend = () => Promise.resolve({ rejected: [] }),
 ): ImapMailWriter {
   return new ImapMailWriter(
     ACCOUNT,
@@ -251,7 +251,7 @@ describe('ImapMailWriter on Gmail', () => {
     let sent = 0;
     const smtp: SmtpSend = () => {
       sent += 1;
-      return Promise.resolve();
+      return Promise.resolve({ rejected: [] });
     };
     const out = await writerFor(fake, smtp).send({
       to: ['friend@example.com'],

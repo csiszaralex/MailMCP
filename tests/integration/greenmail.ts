@@ -85,7 +85,11 @@ export async function startGreenMail(): Promise<GreenMail> {
       auth: { user: acc.username, pass: PASSWORD },
     });
     try {
-      await transport.sendMail({ envelope: { from: envelope.from, to: envelope.to }, raw });
+      const info = await transport.sendMail({
+        envelope: { from: envelope.from, to: envelope.to },
+        raw,
+      });
+      return { rejected: info.rejected };
     } finally {
       transport.close();
     }

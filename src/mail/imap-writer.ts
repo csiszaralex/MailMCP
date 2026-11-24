@@ -60,6 +60,11 @@ export const SENT_COPY_WITHOUT_ID_WARNING =
 export const SENT_DRAFT_KEPT_WARNING =
   'The message was sent, but the draft could not be removed; delete it with delete_draft.';
 
+/** The server accepted the message for some recipients and refused these, who get nothing. */
+export function rejectedRecipientsWarning(addresses: string[]): string {
+  return `The message was sent, but the mail server rejected these recipients, who will not receive it: ${addresses.join(', ')}.`;
+}
+
 const DRAFT_FLAGS = ['\\Draft', '\\Seen'];
 
 /** Where untrash and unmark_spam move to: All Mail on Gmail, INBOX elsewhere (D24). */
@@ -564,8 +569,13 @@ export class ImapMailWriter implements MailWriter {
    */
   async #deliver(spec: MimeSpec, removeDraft?: MessageRef): Promise<SendOutcome> {
     const envelope = envelopeFor(spec);
-    await this.smtp(this.account, await buildMime(spec, { keepBcc: false }), envelope);
-    const warnings: string[] = [];
+    const { rejected } = await this.smtp(
+      this.account,
+      await buildMime(spec, { keepBcc: false }),
+      envelope,
+    );
+    // The addresses go into the tool result only: runTool never logs a result.
+    const warnings = rejected.length > 0 ? [rejectedRecipientsWarning(rejected)] : [];
     let sentCopyId: string | null = null;
     if (this.account.provider !== 'gmail') {
       try {

@@ -13,6 +13,7 @@ import { MailError } from '../../src/errors.js';
 import {
   ImapMailWriter,
   OLD_DRAFT_KEPT_WARNING,
+  rejectedRecipientsWarning,
   SENT_COPY_FAILED_WARNING,
 } from '../../src/mail/imap-writer.js';
 import { STORED_MESSAGE_LIMIT_BYTES } from '../../src/mail/stored.js';
@@ -131,7 +132,9 @@ function fakeWith(options: FakeOptions): Fake {
 
 const UNUSED_READER = {} as MailProvider;
 
-function writer(fake: Fake, smtp: SmtpSend = () => Promise.resolve()): ImapMailWriter {
+const DELIVERED = { rejected: [] };
+
+function writer(fake: Fake, smtp: SmtpSend = () => Promise.resolve(DELIVERED)): ImapMailWriter {
   return new ImapMailWriter(
     ACCOUNT,
     new ImapPool(() => Promise.resolve(fake.client)),
@@ -157,7 +160,7 @@ function countingSmtp(): { send: SmtpSend; calls: () => number } {
   return {
     send: () => {
       count += 1;
-      return Promise.resolve();
+      return Promise.resolve(DELIVERED);
     },
     calls: () => count,
   };
@@ -319,6 +322,15 @@ describe('ImapMailWriter.send', () => {
     expect(out.messageIdHeader).toMatch(/^<.+@example\.org>$/);
   });
 
+  it('names the recipients the server rejected in a warning', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const smtp: SmtpSend = () => Promise.resolve({ rejected: ['carol@example.org'] });
+    const out = await writer(fake, smtp).send({ ...MESSAGE, cc: ['carol@example.org'] });
+    expect(out.warnings).toEqual([rejectedRecipientsWarning(['carol@example.org'])]);
+    expect(out.warnings[0]).toContain('carol@example.org');
+    expect(out.sentCopyId).not.toBeNull();
+  });
+
   it('reports a failed sent copy as a warning', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], appendResult: false });
     const out = await writer(fake).send(MESSAGE);
@@ -343,7 +355,7 @@ describe('ImapMailWriter.sendDraft', () => {
     const order: string[] = [];
     const smtp: SmtpSend = () => {
       order.push(...fake.calls.filter((c) => CHANGES.includes(c)), 'smtp');
-      return Promise.resolve();
+      return Promise.resolve(DELIVERED);
     };
     const out = await writer(fake, smtp).sendDraft(REF);
     expect(out.warnings).toEqual([]);

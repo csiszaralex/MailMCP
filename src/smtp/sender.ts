@@ -9,8 +9,17 @@ export interface Envelope {
   to: string[];
 }
 
-/** Sends an already composed RFC 5322 message; the envelope decides who receives it. */
-export type SmtpSend = (account: Account, raw: Buffer, envelope: Envelope) => Promise<void>;
+/** What the server answered: the envelope recipients it refused while accepting the others. */
+export interface SmtpResult {
+  rejected: string[];
+}
+
+/**
+ * Sends an already composed RFC 5322 message; the envelope decides who receives it. Recipients
+ * the server refuses while it accepts another one do not fail the send; they come back in
+ * `rejected`.
+ */
+export type SmtpSend = (account: Account, raw: Buffer, envelope: Envelope) => Promise<SmtpResult>;
 
 /** Budget for TCP, TLS and the greeting of a new connection. */
 export const SMTP_CONNECTION_TIMEOUT_MS = 15_000;
@@ -49,7 +58,11 @@ export function tlsSmtpSender(passwordFor: PasswordLookup, debug: boolean): Smtp
       smtpTransportOptions(account, passwordFor(account.id), debug),
     );
     try {
-      await transport.sendMail({ envelope: { from: envelope.from, to: envelope.to }, raw });
+      const info = await transport.sendMail({
+        envelope: { from: envelope.from, to: envelope.to },
+        raw,
+      });
+      return { rejected: info.rejected };
     } catch (err) {
       // The server's reply text may contain addresses, so only codes go into the message.
       const detail: string[] = [];
