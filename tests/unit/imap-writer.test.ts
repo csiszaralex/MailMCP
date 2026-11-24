@@ -4,7 +4,9 @@ import type {
   CopyResponseObject,
   FetchMessageObject,
   FetchQueryObject,
+  MailboxLockOptions,
   MailboxObject,
+  MessageRangeOptions,
 } from 'imapflow';
 import type { Account } from '../../src/config/types.js';
 import type { ImapClient } from '../../src/imap/client.js';
@@ -15,6 +17,7 @@ import {
   OLD_DRAFT_KEPT_WARNING,
   rejectedRecipientsWarning,
   SENT_COPY_FAILED_WARNING,
+  SENT_DRAFT_KEPT_WARNING,
 } from '../../src/mail/imap-writer.js';
 import { STORED_MESSAGE_LIMIT_BYTES } from '../../src/mail/stored.js';
 import type { MailProvider } from '../../src/mail/types.js';
@@ -96,20 +99,39 @@ interface Fake {
   /** Names of the client methods called, in order. */
   calls: string[];
   fetchQueries: FetchQueryObject[];
+  /** Every messageDelete call with the mailbox lock held at that moment. */
+  deletes: {
+    range: string;
+    options: MessageRangeOptions | undefined;
+    lock: HeldLock | undefined;
+  }[];
+}
+
+interface HeldLock {
+  path: string;
+  readOnly: boolean;
 }
 
 function fakeWith(options: FakeOptions): Fake {
   const calls: string[] = [];
   const fetchQueries: FetchQueryObject[] = [];
+  const deletes: Fake['deletes'] = [];
+  let held: HeldLock | undefined;
   const client = {
     usable: true,
     capabilities: new Map(options.capabilities.map((c) => [c, true])),
     get mailbox(): MailboxObject {
       return { path: 'Drafts', uidValidity: 9n } as MailboxObject;
     },
-    getMailboxLock: (path: string) => {
+    getMailboxLock: (path: string, lockOptions?: MailboxLockOptions) => {
       calls.push('getMailboxLock');
-      return Promise.resolve({ path, release: () => undefined });
+      held = { path, readOnly: lockOptions?.readOnly === true };
+      return Promise.resolve({
+        path,
+        release: () => {
+          held = undefined;
+        },
+      });
     },
     fetchOne: (uid: string, query: FetchQueryObject) => {
       calls.push('fetchOne');
@@ -140,8 +162,9 @@ function fakeWith(options: FakeOptions): Fake {
       calls.push('messageFlagsRemove');
       return Promise.resolve(options.storeResult ?? true);
     },
-    messageDelete: () => {
+    messageDelete: (range: string, deleteOptions?: MessageRangeOptions) => {
       calls.push('messageDelete');
+      deletes.push({ range, options: deleteOptions, lock: held });
       if (options.deleteResult === 'throw') return Promise.reject(new Error('NO'));
       return Promise.resolve(options.deleteResult ?? true);
     },
@@ -159,7 +182,7 @@ function fakeWith(options: FakeOptions): Fake {
     on: () => undefined,
     logout: () => Promise.resolve(),
   } as Partial<ImapClient> as ImapClient;
-  return { client, calls, fetchQueries };
+  return { client, calls, fetchQueries, deletes };
 }
 
 const UNUSED_READER = {} as MailProvider;
@@ -197,6 +220,11 @@ function countingSmtp(): { send: SmtpSend; calls: () => number } {
     calls: () => count,
   };
 }
+
+/** The draft REF (uid 4) removed by UID EXPUNGE under a write lock on Drafts (D17). */
+const DRAFT_REMOVAL = [
+  { range: '4', options: { uid: true }, lock: { path: 'Drafts', readOnly: false } },
+];
 
 const CHANGES = ['append', 'messageDelete', 'messageMove', 'messageFlagsAdd', 'messageFlagsRemove'];
 
@@ -271,11 +299,13 @@ describe('ImapMailWriter.updateDraft', () => {
     const out = await writer(fake).updateDraft(REF, PATCH);
     expect(out.warnings).toEqual([]);
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['append', 'messageDelete']);
+    expect(fake.deletes).toEqual(DRAFT_REMOVAL);
   });
 
   it('reports a failed removal of the old version as a warning', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], deleteResult: false });
     expect((await writer(fake).updateDraft(REF, PATCH)).warnings).toEqual([OLD_DRAFT_KEPT_WARNING]);
+    expect(fake.deletes).toEqual(DRAFT_REMOVAL);
   });
 
   it('reports a thrown removal error as a warning', async () => {
@@ -439,5 +469,19 @@ describe('ImapMailWriter.sendDraft', () => {
     expect(out.warnings).toEqual([]);
     expect(order).toEqual(['smtp']);
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['append', 'messageDelete']);
+    expect(fake.deletes).toEqual(DRAFT_REMOVAL);
   });
+
+  // An error here would make the caller send the mail again.
+  it.each([false, 'throw'] as const)(
+    'reports a draft it could not remove after the send as a warning (%s)',
+    async (deleteResult) => {
+      const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], deleteResult });
+      const smtp = countingSmtp();
+      const out = await writer(fake, smtp.send).sendDraft(REF);
+      expect(smtp.calls()).toBe(1);
+      expect(out.warnings).toEqual([SENT_DRAFT_KEPT_WARNING]);
+      expect(out.sentCopyId).not.toBeNull();
+    },
+  );
 });
