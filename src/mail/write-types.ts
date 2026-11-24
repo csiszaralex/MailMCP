@@ -20,7 +20,10 @@ export interface Composition {
   includeSignature: boolean;
 }
 
-/** update_draft: omitted fields keep the draft's value; attachments are replaced, never merged (D16). */
+/**
+ * update_draft: omitted fields keep the draft's value. Given attachments replace the draft's, never
+ * merged; omitted ones are refused while the draft has attachments, `[]` drops them (D16).
+ */
 export interface DraftPatch {
   to?: string[];
   cc?: string[];
@@ -28,7 +31,7 @@ export interface DraftPatch {
   subject?: string;
   body?: string;
   htmlBody?: string;
-  attachments: OutgoingAttachment[];
+  attachments?: OutgoingAttachment[];
 }
 
 export interface ReplyInput {

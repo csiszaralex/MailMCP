@@ -206,7 +206,8 @@ describe('write tool list', () => {
     expect(toolOf(tools, 'delete_draft').description).toMatch(/trash/i);
     const update = toolOf(tools, 'update_draft').description ?? '';
     expect(update).toMatch(/id changes/i);
-    expect(update).toMatch(/attachments/i);
+    // ImapMailWriter.updateDraft refuses an update that omits the draft's attachments.
+    expect(update).toContain('attachments: [] drops them');
     // ImapMailWriter.updateDraft replaces body and htmlBody together.
     expect(update).toContain("giving only body drops the draft's HTML version");
   });
@@ -338,7 +339,7 @@ describe('write tool calls', () => {
     expect(writerCalls).toEqual([]);
   });
 
-  it('updates only the given fields of a draft and replaces the attachments', async () => {
+  it('updates only the given fields of a draft', async () => {
     const res = await call('update_draft', {
       draftId: idOf('b'),
       subject: 'New',
@@ -346,6 +347,17 @@ describe('write tool calls', () => {
       body: '',
     });
     expect(JSON.parse(textOf(res))).toMatchObject({ draftId: idOf('b', 2) });
+    expect(writerCalls).toEqual([
+      {
+        account: 'b',
+        method: 'updateDraft',
+        args: [expect.objectContaining({ uid: 1 }) as object, { subject: 'New' }],
+      },
+    ]);
+  });
+
+  it('passes an empty attachment list on, so the writer drops the attachments', async () => {
+    await call('update_draft', { draftId: idOf('b'), subject: 'New', attachments: [] });
     expect(writerCalls).toEqual([
       {
         account: 'b',

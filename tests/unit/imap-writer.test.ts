@@ -47,11 +47,43 @@ const STORED = Buffer.from(
   ].join('\r\n'),
 );
 
+/** A stored draft with two attachments. */
+const STORED_WITH_FILES = Buffer.from(
+  [
+    'From: info@example.org',
+    'To: bob@example.org',
+    'Subject: Offer',
+    'Message-ID: <d2@example.org>',
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="b1"',
+    '',
+    '--b1',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    'See the offer.',
+    '--b1',
+    'Content-Type: application/pdf; name="offer.pdf"',
+    'Content-Disposition: attachment; filename="offer.pdf"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from('%PDF-1.4 offer').toString('base64'),
+    '--b1',
+    'Content-Type: text/plain; name="terms.txt"',
+    'Content-Disposition: attachment; filename="terms.txt"',
+    '',
+    'Terms.',
+    '--b1--',
+    '',
+  ].join('\r\n'),
+);
+
 const REF = { account: 'work', mailbox: 'Drafts', uidValidity: '9', uid: 4 };
 const PATCH: DraftPatch = { subject: 'New', attachments: [] };
 
 interface FakeOptions {
   capabilities: string[];
+  /** The stored message's source; STORED when omitted. */
+  source?: Buffer;
   size?: number;
   deleteResult?: boolean | 'throw';
   moveResult?: CopyResponseObject | false;
@@ -85,9 +117,9 @@ function fakeWith(options: FakeOptions): Fake {
       const msg: FetchMessageObject = {
         seq: Number(uid),
         uid: Number(uid),
-        size: options.size ?? STORED.length,
+        size: options.size ?? (options.source ?? STORED).length,
         envelope: { messageId: '<new@example.org>' },
-        ...(query.source === undefined ? {} : { source: STORED }),
+        ...(query.source === undefined ? {} : { source: options.source ?? STORED }),
       };
       return Promise.resolve(msg);
     },
@@ -249,6 +281,30 @@ describe('ImapMailWriter.updateDraft', () => {
   it('reports a thrown removal error as a warning', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], deleteResult: 'throw' });
     expect((await writer(fake).updateDraft(REF, PATCH)).warnings).toEqual([OLD_DRAFT_KEPT_WARNING]);
+  });
+
+  it('refuses to drop attachments the update does not mention', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], source: STORED_WITH_FILES });
+    await expect(writer(fake).updateDraft(REF, { subject: 'New' })).rejects.toMatchObject({
+      code: 'invalid_id',
+      message:
+        'This draft has 2 attachments; pass attachments: [] to drop them, or give them again.',
+    });
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
+  });
+
+  it('drops the attachments when the update passes an empty list', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], source: STORED_WITH_FILES });
+    const out = await writer(fake).updateDraft(REF, { subject: 'New', attachments: [] });
+    expect(out.warnings).toEqual([]);
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['append', 'messageDelete']);
+  });
+
+  it('updates a draft without attachments when the update omits them', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const out = await writer(fake).updateDraft(REF, { subject: 'New' });
+    expect(out.warnings).toEqual([]);
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['append', 'messageDelete']);
   });
 
   it('refuses a draft over the size limit before downloading it', async () => {

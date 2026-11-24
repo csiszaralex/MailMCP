@@ -66,7 +66,10 @@ function targetLabel(args: TargetArgs): LogTarget {
   return NO_TARGET;
 }
 
-/** update_draft follows the connector: an omitted or empty field keeps the draft's value. */
+/**
+ * update_draft follows the connector: an omitted or empty field keeps the draft's value. Not
+ * attachments: they go on as given, and ImapMailWriter.updateDraft refuses to drop them unasked.
+ */
 function draftPatch(args: {
   to?: string[] | undefined;
   cc?: string[] | undefined;
@@ -74,9 +77,10 @@ function draftPatch(args: {
   subject?: string | undefined;
   body?: string | undefined;
   htmlBody?: string | undefined;
-  attachments: z.infer<typeof attachmentSchema>[];
+  attachments?: z.infer<typeof attachmentSchema>[] | undefined;
 }): DraftPatch {
-  const patch: DraftPatch = { attachments: toOutgoing(args.attachments) };
+  const patch: DraftPatch = {};
+  if (args.attachments !== undefined) patch.attachments = toOutgoing(args.attachments);
   if (args.to !== undefined && args.to.length > 0) patch.to = args.to;
   if (args.cc !== undefined && args.cc.length > 0) patch.cc = args.cc;
   if (args.bcc !== undefined && args.bcc.length > 0) patch.bcc = args.bcc;
@@ -196,7 +200,7 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
     'update_draft',
     {
       title: 'Update a draft',
-      description: `Replaces the fields given; an omitted or empty field keeps the draft's value. body and htmlBody are replaced together: giving only body drops the draft's HTML version, giving only htmlBody drops its plain text. Attachments are not carried over: give every attachment again, or the draft loses them. The draft is saved as a new version, so its id changes: use the new draftId from the answer. ${UNTRUSTED_NOTE}`,
+      description: `Replaces the fields given; an omitted or empty field keeps the draft's value. body and htmlBody are replaced together: giving only body drops the draft's HTML version, giving only htmlBody drops its plain text. Attachments are the exception: given ones replace the draft's, and attachments: [] drops them. Omitting attachments on a draft that has some is refused, because the update would lose them: give them again or pass []. The draft is saved as a new version, so its id changes: use the new draftId from the answer. ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({
         draftId: z.string().describe('Draft id from list_drafts or create_draft.'),
         to: addressListSchema.optional(),
@@ -207,8 +211,8 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
         htmlBody: compositionFields.htmlBody,
         attachments: z
           .array(attachmentSchema)
-          .default([])
-          .describe(`${attachmentsDescription} Replace the draft's attachments.`),
+          .optional()
+          .describe(`${attachmentsDescription} Replace the draft's attachments; [] drops them.`),
       }),
       annotations: WRITE,
     },

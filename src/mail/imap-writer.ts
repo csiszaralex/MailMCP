@@ -76,6 +76,15 @@ const RESTORE_SOURCES = {
   '\\Junk': 'This message is not in spam; search in:spam for its current id.',
 } as const;
 
+/** update_draft without attachments on a draft that has some: the user must say what to keep. */
+function keptAttachmentsRefusal(count: number): MailError {
+  const what = count === 1 ? '1 attachment' : `${String(count)} attachments`;
+  return new MailError(
+    'invalid_id',
+    `This draft has ${what}; pass attachments: [] to drop them, or give them again.`,
+  );
+}
+
 export class ImapMailWriter implements MailWriter {
   constructor(
     readonly account: Account,
@@ -134,6 +143,10 @@ export class ImapMailWriter implements MailWriter {
           // Removing the old version needs UID EXPUNGE; a plain EXPUNGE would hit other clients' mail (D17).
           requireCapability(client, 'UIDPLUS', 'update_draft');
           const stored = await readStored(client, ref);
+          // Checked before the APPEND: the old version, and its files, are expunged after it.
+          if (patch.attachments === undefined && stored.attachments.length > 0) {
+            throw keptAttachmentsRefusal(stored.attachments.length);
+          }
           // A new body replaces the old one in both forms: body without htmlBody drops the HTML.
           const bodyGiven = patch.body !== undefined || patch.htmlBody !== undefined;
           const raw = await buildMime(
@@ -145,7 +158,7 @@ export class ImapMailWriter implements MailWriter {
               text: bodyGiven ? patch.body : stored.text,
               html: bodyGiven ? patch.htmlBody : stored.html,
               // Replaced, never carried over (D16).
-              attachments: decodeAttachments(patch.attachments),
+              attachments: decodeAttachments(patch.attachments ?? []),
               inReplyTo: stored.inReplyTo,
               references: stored.references,
             }),

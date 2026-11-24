@@ -223,6 +223,37 @@ describe('updateDraft', () => {
     expect(draft.subject).toBe('Re: Invoice 2026-11');
   });
 
+  it('refuses an update that would silently drop the attachments', async () => {
+    const pdf = {
+      content: Buffer.from('%PDF-1.4 offer').toString('base64'),
+      filename: 'offer.pdf',
+      mimeType: 'application/pdf',
+      inline: false,
+    };
+    const first = await writer.createDraft(
+      composition({
+        to: ['bob@example.com'],
+        subject: 'Offer',
+        body: 'See the offer.',
+        attachments: [pdf],
+      }),
+      undefined,
+    );
+    const ref = decodeMessageId(first.draftId);
+    await expect(writer.updateDraft(ref, { subject: 'Offer v2' })).rejects.toMatchObject({
+      code: 'invalid_id',
+      message:
+        'This draft has 1 attachment; pass attachments: [] to drop them, or give them again.',
+    });
+    const unchanged = await reader.getMessage(ref, 'plain');
+    expect(unchanged.subject).toBe('Offer');
+    expect(unchanged.attachments.map((a) => a.filename)).toEqual(['offer.pdf']);
+    // An explicit empty list drops them.
+    const second = await writer.updateDraft(ref, { subject: 'Offer v2', attachments: [] });
+    const dropped = await reader.getMessage(decodeMessageId(second.draftId), 'plain');
+    expect([dropped.subject, dropped.attachments]).toEqual(['Offer v2', []]);
+  });
+
   it('refuses a message outside the drafts mailbox and leaves it in place', async () => {
     const ref = await inboxRef('Lunch?');
     await expect(writer.updateDraft(ref, { subject: 'x', attachments: [] })).rejects.toMatchObject({
