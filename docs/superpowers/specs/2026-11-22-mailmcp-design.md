@@ -133,7 +133,7 @@ Minden eszközleírás jelzi, hogy a levéltartalom nem megbízható adat (promp
 | D24 | `trash`, `untrash`, `mark_spam`, `unmark_spam` üzenetre és szálra, áthelyezéssel a Trash vagy Junk mappába. Visszaállítás Gmailnél az „Összes levél” mappába (a címkék megmaradnak, ahogy a connectorban), más fióknál az INBOX-ba. A válasz az áthelyezett levelek új id-jét adja | Áthelyezés után a régi id (mappa és UID) érvénytelen |
 | D25 | `MAILMCP_DEBUG=1`: az imapflow és a nodemailer protokoll naplója a stderr-re. Levéltartalmat is kiír (a jelszót az imapflow kitakarja), ezért alapból ki van kapcsolva, és csak a lokális (`127.0.0.1`) futásban engedett; a nyilvános telepítés ezzel nem indul el | Hibakereséshez kell, de a valódi fiókok leveleit nem szabad minden futásnál a terminálba írni |
 
-Hibakódok bővülnek: `not_permitted` (a fiók szintje nem engedi), `unsupported_server` (hiányzó UIDPLUS vagy MOVE), `send_failed` (az SMTP szerver elutasította vagy nem érhető el).
+Hibakódok bővülnek: `not_permitted` (a fiók szintje nem engedi), `unsupported_server` (hiányzó UIDPLUS vagy MOVE), `send_failed` (az SMTP szerver elutasította vagy nem érhető el), `update_failed` (az IMAP szerver elutasította a jelző, címke vagy áthelyezés módosítását; az elutasítás előtt már elmentett módosítások megmaradnak).
 
 ## Konfig és titkok
 
