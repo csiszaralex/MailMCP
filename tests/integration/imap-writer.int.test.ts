@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Account } from '../../src/config/types.js';
-import { decodeMessageId, type MessageRef } from '../../src/ids.js';
+import { decodeMessageId, decodeThreadId, type MessageRef } from '../../src/ids.js';
 import { ImapPool } from '../../src/imap/pool.js';
 import { ImapMailProvider } from '../../src/mail/imap-provider.js';
 import { ImapMailWriter } from '../../src/mail/imap-writer.js';
-import type { Composition } from '../../src/mail/write-types.js';
+import type { Composition, MoveOutcome, WriteTarget } from '../../src/mail/write-types.js';
 import { seed, startGreenMail, WRITE_MAILBOXES, type GreenMail } from './greenmail.js';
 
 let gm: GreenMail;
@@ -239,5 +239,228 @@ describe('deleteDraft', () => {
     const trashed = await reader.getMessage(decodeMessageId(trashedId), 'plain');
     expect(trashed.subject).toBe('Throwaway draft');
     expect(trashed.mailbox).toBe('Trash');
+  });
+});
+
+/** Appends a fresh message, so these tests never consume the shared seed messages. */
+async function appendFresh(path: string, subject: string, headers: string[] = []): Promise<void> {
+  const client = await gm.connect(gm.account);
+  try {
+    const raw = [
+      'From: Carol <carol@example.com>',
+      'To: alice@example.com',
+      `Subject: ${subject}`,
+      ...headers,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      `${subject} body`,
+      '',
+    ].join('\r\n');
+    await client.append(path, Buffer.from(raw), []);
+  } finally {
+    await client.logout();
+  }
+}
+
+async function refIn(path: string, subject: string): Promise<MessageRef> {
+  const [found] = (await reader.search(`in:${path} subject:"${subject}"`, 0, 10)).messages.filter(
+    (m) => m.subject === subject,
+  );
+  if (found === undefined) throw new Error(`message "${subject}" missing from ${path}`);
+  return decodeMessageId(found.id);
+}
+
+async function freshRef(path: string, subject: string): Promise<MessageRef> {
+  await appendFresh(path, subject);
+  return refIn(path, subject);
+}
+
+function message(ref: MessageRef): WriteTarget {
+  return { kind: 'message', ref };
+}
+
+/** Two INBOX messages of one thread; returns its thread id as get_message reports it. */
+async function freshThread(root: string, subject: string): Promise<WriteTarget> {
+  await appendFresh('INBOX', subject, [`Message-ID: <${root}>`]);
+  await appendFresh('INBOX', `Re: ${subject}`, [
+    `Message-ID: <reply-${root}>`,
+    `In-Reply-To: <${root}>`,
+    `References: <${root}>`,
+  ]);
+  const detail = await reader.getMessage(await refIn('INBOX', subject), 'metadata');
+  return { kind: 'thread', ref: decodeThreadId(detail.threadId) };
+}
+
+function onlyId(out: MoveOutcome): MessageRef {
+  expect(out.warnings).toEqual([]);
+  expect(out.messageIds).toHaveLength(1);
+  const [id] = out.messageIds;
+  if (id === undefined) throw new Error('no id');
+  return decodeMessageId(id);
+}
+
+describe('updateLabels', () => {
+  it('marks read and starred with flags', async () => {
+    const ref = await freshRef('INBOX', 'Flag me');
+    const out = await writer.updateLabels(message(ref), { add: ['STARRED'], remove: ['UNREAD'] });
+    expect(onlyId(out)).toEqual(ref);
+    const flags = (await reader.getMessage(ref, 'metadata')).flags;
+    expect(flags).toEqual(expect.arrayContaining(['\\Seen', '\\Flagged']));
+  });
+
+  it('moves to a folder by adding it as a label and returns the new id', async () => {
+    const ref = await freshRef('INBOX', 'File me');
+    const out = await writer.updateLabels(message(ref), { add: ['Newsletters'], remove: [] });
+    const moved = onlyId(out);
+    expect(moved.mailbox).toBe('Newsletters');
+    expect((await reader.getMessage(moved, 'metadata')).subject).toBe('File me');
+    expect(await subjectsIn('in:inbox')).not.toContain('File me');
+  });
+
+  it('sets the flags and then moves when both are asked', async () => {
+    const ref = await freshRef('INBOX', 'Star and file me');
+    const moved = onlyId(
+      await writer.updateLabels(message(ref), { add: ['STARRED', 'Newsletters'], remove: [] }),
+    );
+    expect(moved.mailbox).toBe('Newsletters');
+    expect((await reader.getMessage(moved, 'metadata')).flags).toContain('\\Flagged');
+  });
+
+  it('archives by removing INBOX', async () => {
+    const ref = await freshRef('INBOX', 'Archive me');
+    const moved = onlyId(await writer.updateLabels(message(ref), { add: [], remove: ['INBOX'] }));
+    expect(moved.mailbox).toBe('Archive');
+    expect(await subjectsIn('in:Archive')).toContain('Archive me');
+  });
+
+  it('refuses two folders at once', async () => {
+    const ref = await freshRef('INBOX', 'Two folders');
+    await expect(
+      writer.updateLabels(message(ref), { add: ['Newsletters', 'Forwards'], remove: [] }),
+    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    expect((await reader.getMessage(ref, 'metadata')).mailbox).toBe('INBOX');
+  });
+
+  it('sets no flag when the folder to move to does not exist', async () => {
+    const ref = await freshRef('INBOX', 'Missing folder');
+    await expect(
+      writer.updateLabels(message(ref), { add: ['STARRED', 'NoSuchFolder'], remove: [] }),
+    ).rejects.toMatchObject({ code: 'mailbox_not_found' });
+    const after = await reader.getMessage(ref, 'metadata');
+    expect([after.mailbox, after.flags.includes('\\Flagged')]).toEqual(['INBOX', false]);
+  });
+
+  it('refuses the other folder combinations and changes no flag', async () => {
+    const ref = await freshRef('INBOX', 'Odd combination');
+    await expect(
+      writer.updateLabels(message(ref), { add: ['STARRED', 'Newsletters'], remove: ['INBOX'] }),
+    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    await expect(
+      writer.updateLabels(message(ref), { add: [], remove: ['Newsletters'] }),
+    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    const filed = await freshRef('Newsletters', 'Not in the inbox');
+    await expect(
+      writer.updateLabels(message(filed), { add: [], remove: ['INBOX'] }),
+    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    expect((await reader.getMessage(ref, 'metadata')).flags).not.toContain('\\Flagged');
+  });
+});
+
+describe('trash and spam', () => {
+  it('trashes and restores a message to INBOX', async () => {
+    const ref = await freshRef('INBOX', 'Trash me');
+    const trashed = onlyId(await writer.trash(message(ref)));
+    expect(trashed.mailbox).toBe('Trash');
+    expect(await subjectsIn('in:trash')).toContain('Trash me');
+    const restored = onlyId(await writer.untrash(message(trashed)));
+    expect(restored.mailbox).toBe('INBOX');
+    expect((await reader.getMessage(restored, 'metadata')).subject).toBe('Trash me');
+    expect(await subjectsIn('in:trash')).not.toContain('Trash me');
+  });
+
+  it('marks a message as spam and back', async () => {
+    const ref = await freshRef('INBOX', 'Spam me');
+    const junk = onlyId(await writer.markSpam(message(ref)));
+    expect(junk.mailbox).toBe('Junk');
+    const restored = onlyId(await writer.unmarkSpam(message(junk)));
+    expect(restored.mailbox).toBe('INBOX');
+  });
+
+  it('trashes a whole thread and restores it with the same thread id', async () => {
+    const thread = await freshThread('t7-trash@example.com', 'Thread to trash');
+    expect((await writer.trash(thread)).messageIds).toHaveLength(2);
+    expect(await subjectsIn('in:trash')).toEqual(
+      expect.arrayContaining(['Thread to trash', 'Re: Thread to trash']),
+    );
+    expect(await subjectsIn('in:inbox')).not.toContain('Thread to trash');
+    // The thread id still names INBOX: untrash searches the trash instead (threadLocation's mailbox).
+    const restored = await writer.untrash(thread);
+    expect(restored.messageIds.map((id) => decodeMessageId(id).mailbox)).toEqual([
+      'INBOX',
+      'INBOX',
+    ]);
+    expect(await subjectsIn('in:trash')).not.toContain('Thread to trash');
+  });
+
+  it('restores a whole thread from spam with the same thread id', async () => {
+    const thread = await freshThread('t7-spam@example.com', 'Thread to junk');
+    expect((await writer.markSpam(thread)).messageIds).toHaveLength(2);
+    expect((await writer.unmarkSpam(thread)).messageIds).toHaveLength(2);
+    expect(await subjectsIn('in:inbox')).toEqual(
+      expect.arrayContaining(['Thread to junk', 'Re: Thread to junk']),
+    );
+    expect(await subjectsIn('in:spam')).not.toContain('Thread to junk');
+  });
+
+  it('restores only ids that are in the trash or spam', async () => {
+    const ref = await freshRef('INBOX', 'Never trashed');
+    await expect(writer.untrash(message(ref))).rejects.toMatchObject({ code: 'not_found' });
+    const trashed = onlyId(await writer.trash(message(await freshRef('INBOX', 'Only trashed'))));
+    await expect(writer.unmarkSpam(message(trashed))).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    // Both ids still name their message where it was: nothing moved.
+    expect((await reader.getMessage(ref, 'metadata')).subject).toBe('Never trashed');
+    expect((await reader.getMessage(trashed, 'metadata')).subject).toBe('Only trashed');
+  });
+
+  it('reports a thread with no message in the trash as not found', async () => {
+    const thread = await freshThread('t7-none@example.com', 'Thread never trashed');
+    await expect(writer.untrash(thread)).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
+describe('manageLabel', () => {
+  it('deletes only empty folders and never system ones', async () => {
+    await writer.manageLabel({ action: 'create', name: 'Empty' });
+    await writer.manageLabel({ action: 'delete', name: 'Empty' });
+    expect((await reader.listLabels()).map((l) => l.name)).not.toContain('Empty');
+    await expect(
+      writer.manageLabel({ action: 'delete', name: 'Newsletters' }),
+    ).rejects.toMatchObject({ code: 'not_permitted' });
+    await expect(
+      writer.manageLabel({ action: 'rename', name: 'Trash', newName: 'Bin' }),
+    ).rejects.toMatchObject({ code: 'not_permitted' });
+    await expect(
+      writer.manageLabel({ action: 'rename', name: 'INBOX', newName: 'Old' }),
+    ).rejects.toMatchObject({ code: 'not_permitted' });
+    await expect(writer.manageLabel({ action: 'delete', name: 'Junk' })).rejects.toMatchObject({
+      code: 'not_permitted',
+    });
+  });
+
+  it('creates idempotently and renames a folder', async () => {
+    await writer.manageLabel({ action: 'create', name: 'Projects' });
+    await writer.manageLabel({ action: 'create', name: 'Projects' });
+    await writer.manageLabel({ action: 'rename', name: 'Projects', newName: 'Clients' });
+    const names = (await reader.listLabels()).map((l) => l.name);
+    expect(names).toContain('Clients');
+    expect(names).not.toContain('Projects');
+  });
+
+  it('reports a missing folder', async () => {
+    await expect(writer.manageLabel({ action: 'delete', name: 'Nowhere' })).rejects.toMatchObject({
+      code: 'mailbox_not_found',
+    });
   });
 });

@@ -48,6 +48,7 @@ interface FakeOptions {
   size?: number;
   deleteResult?: boolean | 'throw';
   moveResult?: CopyResponseObject | false;
+  storeResult?: boolean;
 }
 
 interface Fake {
@@ -87,6 +88,18 @@ function fakeWith(options: FakeOptions): Fake {
       const res: AppendResponseObject = { destination: path, uid: 5, uidValidity: 9n };
       return Promise.resolve(res);
     },
+    search: () => {
+      calls.push('search');
+      return Promise.resolve([4]);
+    },
+    messageFlagsAdd: () => {
+      calls.push('messageFlagsAdd');
+      return Promise.resolve(options.storeResult ?? true);
+    },
+    messageFlagsRemove: () => {
+      calls.push('messageFlagsRemove');
+      return Promise.resolve(options.storeResult ?? true);
+    },
     messageDelete: () => {
       calls.push('messageDelete');
       if (options.deleteResult === 'throw') return Promise.reject(new Error('NO'));
@@ -120,7 +133,7 @@ function writer(fake: Fake): ImapMailWriter {
   );
 }
 
-const CHANGES = ['append', 'messageDelete', 'messageMove'];
+const CHANGES = ['append', 'messageDelete', 'messageMove', 'messageFlagsAdd', 'messageFlagsRemove'];
 
 describe('ImapMailWriter capability checks', () => {
   it('changes nothing when UIDPLUS is missing', async () => {
@@ -155,6 +168,35 @@ describe('ImapMailWriter capability checks', () => {
       code: 'unsupported_server',
     });
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
+  });
+
+  it('sets no flag without MOVE when the label change also moves', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS'] });
+    await expect(
+      writer(fake).updateLabels(
+        { kind: 'message', ref: REF },
+        { add: ['STARRED', 'Newsletters'], remove: [] },
+      ),
+    ).rejects.toMatchObject({ code: 'unsupported_server' });
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
+  });
+
+  it('sets flags without MOVE when nothing moves', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS'] });
+    await writer(fake).updateLabels(
+      { kind: 'message', ref: REF },
+      { add: ['STARRED'], remove: [] },
+    );
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['messageFlagsAdd']);
+  });
+});
+
+describe('ImapMailWriter.updateLabels', () => {
+  it('reports flags the server refused', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], storeResult: false });
+    await expect(
+      writer(fake).updateLabels({ kind: 'message', ref: REF }, { add: ['STARRED'], remove: [] }),
+    ).rejects.toMatchObject({ code: 'update_failed' });
   });
 });
 

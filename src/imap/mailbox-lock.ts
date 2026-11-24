@@ -23,11 +23,10 @@ export async function withMailbox<T>(
   } catch (err) {
     // imapflow sets mailboxMissing when SELECT/EXAMINE failed and LIST does not show the path.
     if (err instanceof Error && 'mailboxMissing' in err && err.mailboxMissing === true) {
+      if (opts.from === 'query') throw unknownMailbox(path, { cause: err });
       throw new MailError(
         'mailbox_not_found',
-        opts.from === 'id'
-          ? `The mailbox "${path}" of this id no longer exists, so the id is outdated; search again.`
-          : `Mailbox "${path}" does not exist on this account; use list_labels to see the mailboxes.`,
+        `The mailbox "${path}" of this id no longer exists, so the id is outdated; search again.`,
         { cause: err },
       );
     }
@@ -46,7 +45,7 @@ export async function withMailbox<T>(
 /** Fails with `unsupported_server` when the server lacks a capability the action depends on. */
 export function requireCapability(
   client: ImapClient,
-  capability: 'UIDPLUS' | 'MOVE',
+  capability: 'UIDPLUS' | 'MOVE' | 'X-GM-EXT-1',
   action: string,
 ): void {
   if (!client.capabilities.has(capability)) {
@@ -55,4 +54,13 @@ export function requireCapability(
       `The mail server does not support ${capability}, which ${action} needs.`,
     );
   }
+}
+
+/** A mailbox named by the caller (a query, a label or folder name) that the account lacks. */
+export function unknownMailbox(path: string, options?: ErrorOptions): MailError {
+  return new MailError(
+    'mailbox_not_found',
+    `Mailbox "${path}" does not exist on this account; use list_labels to see the mailboxes.`,
+    options,
+  );
 }

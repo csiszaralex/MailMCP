@@ -299,7 +299,7 @@ export class ImapMailProvider implements MailProvider {
 }
 
 /** imapflow resolves false when the server answers NO or BAD, and undefined without a mailbox. */
-function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
+export function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
   if (found === undefined) {
     // We hold a mailbox lock, so no selected mailbox means the connection went away meanwhile.
     throw new MailError(

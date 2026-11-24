@@ -17,7 +17,9 @@ export type MailErrorCode =
   /** The mail server lacks a capability the tool needs. */
   | 'unsupported_server'
   /** The SMTP server refused or failed to send the message. */
-  | 'send_failed';
+  | 'send_failed'
+  /** The IMAP server refused a flag, label or move change; changes stored before it are kept. */
+  | 'update_failed';
 
 /** An expected failure whose message is safe to show to the MCP client. */
 export class MailError extends Error {
