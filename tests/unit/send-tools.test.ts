@@ -36,6 +36,9 @@ function fakeWriter(account: Account): MailWriter {
       writerCalls.push({ account: account.id, method, args });
       return Promise.resolve({
         messageIdHeader: '<m@example.org>',
+        to: ['bob@example.org'],
+        cc: [],
+        bcc: [],
         sentCopyId: null,
         warnings: [],
       });
@@ -167,6 +170,9 @@ describe('send', () => {
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(textOf(res))).toEqual({
       messageIdHeader: '<m@example.org>',
+      to: ['bob@example.org'],
+      cc: [],
+      bcc: [],
       sentCopyId: null,
       warnings: [],
     });

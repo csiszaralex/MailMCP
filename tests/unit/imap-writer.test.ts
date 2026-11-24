@@ -314,6 +314,20 @@ describe('ImapMailWriter.send', () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it('returns the recipients the message went to', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const out = await writer(fake).send({
+      ...MESSAGE,
+      cc: ['carol@example.org'],
+      bcc: ['dave@example.org'],
+    });
+    expect(out).toMatchObject({
+      to: ['bob@example.org'],
+      cc: ['carol@example.org'],
+      bcc: ['dave@example.org'],
+    });
+  });
+
   it('stores a sent copy and returns its id', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
     const out = await writer(fake).send(MESSAGE);

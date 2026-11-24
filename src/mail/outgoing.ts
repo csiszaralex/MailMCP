@@ -34,7 +34,6 @@ export interface ReplyContext {
 /** The original's headers that MessageDetail does not carry. */
 export interface ReplyHeaders {
   messageId: string | undefined;
-  replyTo: Address[];
   references: string[];
 }
 
@@ -75,7 +74,7 @@ export function replyContext(
   replyAll: boolean,
 ): ReplyContext {
   const recipients = replyRecipients(
-    { from: original.from, to: original.to, cc: original.cc, replyTo: headers.replyTo },
+    { from: original.from, to: original.to, cc: original.cc, replyTo: original.replyTo },
     account,
     replyAll,
   );

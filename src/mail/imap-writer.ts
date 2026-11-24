@@ -16,7 +16,7 @@ import {
   type FlagChange,
 } from './label-plan.js';
 import { buildMime, decodeAttachments, type MimeSpec } from './compose.js';
-import { messageThreadId, referenceIds, threadIdFields, toAddresses } from './message-parts.js';
+import { messageThreadId, referenceIds, threadIdFields } from './message-parts.js';
 import {
   accountSpec,
   envelopeFor,
@@ -33,7 +33,7 @@ import {
 import { assertCurrent, assertOwnAccount, messageGone } from './ref-checks.js';
 import { readStored } from './stored.js';
 import { threadLocation } from './thread-locate.js';
-import type { MailProvider } from './types.js';
+import type { Address, MailProvider } from './types.js';
 import type {
   Composition,
   DraftOutcome,
@@ -538,7 +538,7 @@ export class ImapMailWriter implements MailWriter {
     replyAll: boolean,
   ): Promise<ReplyContext> {
     assertOwnAccount(this.account, ref.account);
-    // MessageDetail has neither Reply-To nor References, so the writer fetches them itself.
+    // MessageDetail has no References, so the writer fetches them itself.
     const headers = await this.pool.use(this.account, (client) =>
       withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
         assertCurrent(ref, uidValidity);
@@ -550,7 +550,6 @@ export class ImapMailWriter implements MailWriter {
         if (msg === false) throw messageGone();
         return {
           messageId: msg.envelope?.messageId,
-          replyTo: toAddresses(msg.envelope?.replyTo),
           references: referenceIds(msg.headers),
         };
       }),
@@ -588,7 +587,16 @@ export class ImapMailWriter implements MailWriter {
     if (removeDraft !== undefined && !(await this.#removeDraft(removeDraft).catch(() => false))) {
       warnings.push(SENT_DRAFT_KEPT_WARNING);
     }
-    return { messageIdHeader: spec.messageId, sentCopyId, warnings };
+    const addresses = (list: Address[]): string[] => list.map((a) => a.address);
+    return {
+      messageIdHeader: spec.messageId,
+      // In the tool result only: runTool never logs a result.
+      to: addresses(spec.to),
+      cc: addresses(spec.cc),
+      bcc: addresses(spec.bcc),
+      sentCopyId,
+      warnings,
+    };
   }
 
   /** APPENDs the sent message, Bcc included, to the Sent mailbox; null when it got no id. */

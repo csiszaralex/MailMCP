@@ -39,6 +39,7 @@ function summary(acc: string): MessageSummary {
 function fakeProvider(acc: Account): MailProvider {
   const detail: MessageDetail = {
     ...summary(acc.id),
+    replyTo: [],
     messageIdHeader: '<m@x>',
     inReplyTo: null,
     attachments: [],

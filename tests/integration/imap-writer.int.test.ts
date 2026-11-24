@@ -547,7 +547,7 @@ describe('send', () => {
 
   it('delivers to the Bcc recipient through the envelope', async () => {
     const recording = recordingWriter();
-    await recording.writer.send(
+    const out = await recording.writer.send(
       composition({
         to: ['bob@example.com'],
         cc: ['carol@example.com'],
@@ -562,6 +562,11 @@ describe('send', () => {
         to: ['bob@example.com', 'carol@example.com', 'dave@example.com'],
       },
     ]);
+    expect(out).toMatchObject({
+      to: ['bob@example.com'],
+      cc: ['carol@example.com'],
+      bcc: ['dave@example.com'],
+    });
   });
 });
 
@@ -578,6 +583,7 @@ describe('sendDraft', () => {
     );
     const out = await writer.sendDraft(decodeMessageId(draft.draftId));
     expect(out.warnings).toEqual([]);
+    expect(out).toMatchObject({ to: ['bob@example.com'], cc: [], bcc: ['dave@example.com'] });
     const received = await bobReader.getMessage(await receivedByBob('Draft to send'), 'raw');
     expect(received.body).toContain('From the drafts');
     expect(received.body).not.toMatch(/^Bcc:/im);
@@ -604,6 +610,39 @@ describe('reply', () => {
     expect(received.body).toContain('> Please find the invoice attached.');
     const raw = await bobReader.getMessage(ref, 'raw');
     expect(raw.body).toContain('References: <m1@example.com>');
+  });
+
+  it('replies to the Reply-To address and says so in the answer', async () => {
+    // From carol, without a Reply-To header.
+    const ref = await freshRef('INBOX', 'Reply elsewhere');
+    const client = await gm.connect(gm.account);
+    try {
+      const raw = [
+        'From: Carol <carol@example.com>',
+        'Reply-To: Desk <desk@example.com>',
+        'To: alice@example.com',
+        'Subject: Reply elsewhere 2',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'Answer the desk.',
+        '',
+      ].join('\r\n');
+      await client.append('INBOX', Buffer.from(raw), []);
+    } finally {
+      await client.logout();
+    }
+    const original = await refIn('INBOX', 'Reply elsewhere 2');
+    for (const format of ['metadata', 'plain', 'html', 'raw'] as const) {
+      expect((await reader.getMessage(original, format)).replyTo).toEqual([
+        { name: 'Desk', address: 'desk@example.com' },
+      ]);
+    }
+    // Without a Reply-To header the IMAP envelope repeats From (RFC 3501).
+    expect((await reader.getMessage(ref, 'metadata')).replyTo).toEqual([
+      { name: 'Carol', address: 'carol@example.com' },
+    ]);
+    const out = await writer.reply(original, replyInput({ body: 'Noted.', replyAll: true }));
+    expect(out).toMatchObject({ to: ['desk@example.com'], cc: [], bcc: [] });
   });
 
   it('reply all skips our own plus address', async () => {
@@ -642,6 +681,7 @@ describe('forward', () => {
       forwardInput({ to: ['bob@example.com'], forwardText: 'FYI' }),
     );
     expect(out.warnings).toEqual([]);
+    expect(out).toMatchObject({ to: ['bob@example.com'], cc: [], bcc: [] });
     const ref = await receivedByBob('Fwd: Invoice 2026-11');
     const received = await bobReader.getMessage(ref, 'plain');
     expect(received.attachments.map((a) => a.filename)).toEqual(['invoice.pdf']);

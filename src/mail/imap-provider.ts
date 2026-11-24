@@ -230,6 +230,7 @@ export class ImapMailProvider implements MailProvider {
       if (msg === undefined) continue;
       details.push({
         ...this.#summary(path, uidValidity, msg),
+        replyTo: toAddresses(msg.envelope?.replyTo),
         messageIdHeader: msg.envelope?.messageId ?? null,
         inReplyTo: msg.envelope?.inReplyTo ?? null,
         attachments: collectAttachments(msg.bodyStructure),

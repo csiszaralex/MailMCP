@@ -30,6 +30,9 @@ const SEND = { readOnlyHint: false, openWorldHint: true, destructiveHint: true }
 
 const IMMEDIATE = 'The mail is sent immediately and cannot be recalled.';
 
+const RETURNS =
+  'Returns the Message-ID header, the to, cc and bcc addresses it went to, the id of the copy in the Sent folder (null on Gmail, which keeps its own) and any warnings.';
+
 const messageIdField = (what: string) =>
   z.string().describe(`Id of the message to ${what}, from search or read_message.`);
 
@@ -56,7 +59,7 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
   };
   const sendMeta = {
     title: 'Send an email',
-    description: `Sends a new mail, or with draftId a saved draft. ${IMMEDIATE} A new mail needs at least one recipient (to, cc or bcc). Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. Returns the Message-ID header, the id of the copy in the Sent folder (null on Gmail, which keeps its own) and any warnings. ${UNTRUSTED_NOTE}`,
+    description: `Sends a new mail, or with draftId a saved draft. ${IMMEDIATE} A new mail needs at least one recipient (to, cc or bcc). Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. ${RETURNS} ${UNTRUSTED_NOTE}`,
     annotations: SEND,
   };
   const handleSend = (
@@ -129,7 +132,7 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
     'reply',
     {
       title: 'Reply to an email',
-      description: `Replies to a message in its conversation: threading headers, a "Re:" subject and the original quoted. Without to and cc the recipients are the Reply-To or From address of the original (the original's recipients if you sent it); replyAll adds its To and Cc addresses, without your own. ${IMMEDIATE} Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. ${UNTRUSTED_NOTE}`,
+      description: `Replies to a message in its conversation: threading headers, a "Re:" subject and the original quoted. Without to and cc the recipients are the Reply-To or From address of the original (the original's recipients if you sent it); replyAll adds its To and Cc addresses, without your own. get_message shows replyTo, so you can check where a reply goes before sending it. ${IMMEDIATE} Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. ${RETURNS} ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({
         messageId: messageIdField('reply to'),
         body: compositionFields.body,
@@ -166,7 +169,7 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
     'forward',
     {
       title: 'Forward an email',
-      description: `Forwards a message: your note first, then a "Forwarded message" header block (From, Date, Subject, To) and the original text, with a "Fwd:" subject. The original's attachments go along; they count towards the limit of ${ATTACHMENT_LIMIT_MB} MB together with the attachments you add. ${IMMEDIATE} ${UNTRUSTED_NOTE}`,
+      description: `Forwards a message: your note first, then a "Forwarded message" header block (From, Date, Subject, To) and the original text, with a "Fwd:" subject. The original's attachments go along; they count towards the limit of ${ATTACHMENT_LIMIT_MB} MB together with the attachments you add. ${IMMEDIATE} ${RETURNS} ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({
         messageId: messageIdField('forward'),
         to: addressListSchema.min(1).describe('Primary recipients; at least one email address.'),

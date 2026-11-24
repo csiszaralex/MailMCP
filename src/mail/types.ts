@@ -36,6 +36,11 @@ export interface AttachmentInfo {
 }
 
 export interface MessageDetail extends MessageSummary {
+  /**
+   * Where a reply goes (D19). From the IMAP envelope, which repeats From when the message has no
+   * Reply-To header (RFC 3501).
+   */
+  replyTo: Address[];
   messageIdHeader: string | null;
   inReplyTo: string | null;
   attachments: AttachmentInfo[];

@@ -60,7 +60,11 @@ function fakeServer(
     uid,
     size: 30 * 1024 * 1024 + 500,
     bodyStructure: structure,
-    envelope: { subject: `mail ${String(uid)}`, messageId: `<m${String(uid)}@example.org>` },
+    envelope: {
+      subject: `mail ${String(uid)}`,
+      messageId: `<m${String(uid)}@example.org>`,
+      replyTo: [{ name: 'Desk', address: 'desk@example.org' }],
+    },
   });
   const client = {
     usable: true,
@@ -96,6 +100,15 @@ function providerFor(fake: Fake): ImapMailProvider {
 }
 
 const REF = { account: 'work', mailbox: 'INBOX', uidValidity: '9', uid: 4 };
+
+describe('ImapMailProvider message metadata', () => {
+  it('reports the Reply-To addresses in every format', async () => {
+    for (const format of ['metadata', 'plain', 'html'] as const) {
+      const detail = await providerFor(fakeServer([4])).getMessage(REF, format);
+      expect(detail.replyTo).toEqual([{ name: 'Desk', address: 'desk@example.org' }]);
+    }
+  });
+});
 
 describe('ImapMailProvider body download', () => {
   it('downloads only the text part for the plain format', async () => {

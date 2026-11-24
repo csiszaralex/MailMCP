@@ -78,6 +78,10 @@ export interface MoveOutcome {
 
 export interface SendOutcome {
   messageIdHeader: string;
+  /** The addresses the message went to, so the caller sees where a computed reply went. */
+  to: string[];
+  cc: string[];
+  bcc: string[];
   sentCopyId: string | null;
   warnings: string[];
 }
