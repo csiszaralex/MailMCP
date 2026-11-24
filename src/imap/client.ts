@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { protocolDebugLogger } from '../boundary.js';
 import type {
   AppendResponseObject,
   CopyResponseObject,
@@ -89,7 +90,11 @@ export const IDLE_CLOSE_MS = 60_000;
 export const SOCKET_TIMEOUT_MS = 2 * IDLE_CLOSE_MS;
 
 /** TLS is mandatory and certificate checks cannot be turned off (spec: "Levelezőszerverek felé"). */
-export function imapConnectionOptions(account: Account, password: string): ImapFlowOptions {
+export function imapConnectionOptions(
+  account: Account,
+  password: string,
+  debug: boolean,
+): ImapFlowOptions {
   const implicitTls = account.imap.port === 993;
   return {
     host: account.imap.host,
@@ -98,7 +103,7 @@ export function imapConnectionOptions(account: Account, password: string): ImapF
     doSTARTTLS: implicitTls ? undefined : true,
     auth: { user: account.username, pass: password },
     tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
-    logger: false,
+    logger: debug ? protocolDebugLogger('imap', account.id) : false,
     disableAutoIdle: true,
     connectionTimeout: CONNECTION_TIMEOUT_MS,
     socketTimeout: SOCKET_TIMEOUT_MS,
@@ -106,9 +111,9 @@ export function imapConnectionOptions(account: Account, password: string): ImapF
 }
 
 /** The production factory: TLS connections, passwords from the lookup loadConfig built. */
-export function tlsConnector(passwordFor: PasswordLookup): ImapClientFactory {
+export function tlsConnector(passwordFor: PasswordLookup, debug: boolean): ImapClientFactory {
   return async (account) => {
-    const client = new ImapFlow(imapConnectionOptions(account, passwordFor(account.id)));
+    const client = new ImapFlow(imapConnectionOptions(account, passwordFor(account.id), debug));
     await client.connect();
     return client;
   };
