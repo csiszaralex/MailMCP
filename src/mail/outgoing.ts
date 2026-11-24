@@ -26,7 +26,7 @@ export interface ReplyContext {
   subject: string;
   inReplyTo: string | undefined;
   references: string[];
-  /** Never empty: without other recipients the reply goes to the account itself (R3). */
+  /** Never empty: without other recipients the reply goes to the account itself (D19). */
   to: Address[];
   cc: Address[];
 }
@@ -42,7 +42,10 @@ export function plainAddresses(list: string[]): Address[] {
   return list.map((address) => ({ name: '', address }));
 }
 
-/** The MIME spec of a message from this account: From is always the account's own address (R5). */
+/**
+ * The MIME spec of a message from this account: From is always the account's own address, also
+ * for a stored draft whose From names someone else.
+ */
 export function accountSpec(
   account: Account,
   fields: Omit<MimeSpec, 'from' | 'messageId' | 'date'>,

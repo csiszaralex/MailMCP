@@ -98,7 +98,7 @@ export class ImapMailWriter implements MailWriter {
       replyTo === undefined
         ? undefined
         : await this.#replyContext(replyTo, c.htmlBody !== undefined, false);
-    // R2: a reply draft without any recipient takes them from the original.
+    // A reply draft without any recipient takes them from the original (D19).
     const recipients =
       reply !== undefined && c.to.length + c.cc.length + c.bcc.length === 0
         ? { to: reply.to, cc: reply.cc }

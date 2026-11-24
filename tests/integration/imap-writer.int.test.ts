@@ -96,7 +96,7 @@ describe('createDraft', () => {
     expect(draft.inReplyTo).toBe('<m1@example.com>');
     expect(draft.body).toContain('Got it.');
     expect(draft.body).toContain('> Please find the invoice attached.');
-    // R2: no recipients given, so they come from the original (Bob, its sender).
+    // No recipients given, so they come from the original (Bob, its sender; D19).
     expect(draft.to.map((a) => a.address)).toEqual(['bob@example.com']);
     const raw = await reader.getMessage(decodeMessageId(out.draftId), 'raw');
     expect(raw.body).toContain('References: <m1@example.com>');
