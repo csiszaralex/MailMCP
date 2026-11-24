@@ -9,10 +9,16 @@ import type {
 import type { Account } from '../../src/config/types.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import { ImapPool } from '../../src/imap/pool.js';
-import { ImapMailWriter, OLD_DRAFT_KEPT_WARNING } from '../../src/mail/imap-writer.js';
+import { MailError } from '../../src/errors.js';
+import {
+  ImapMailWriter,
+  OLD_DRAFT_KEPT_WARNING,
+  SENT_COPY_FAILED_WARNING,
+} from '../../src/mail/imap-writer.js';
 import { STORED_MESSAGE_LIMIT_BYTES } from '../../src/mail/stored.js';
 import type { MailProvider } from '../../src/mail/types.js';
-import type { DraftPatch } from '../../src/mail/write-types.js';
+import type { SmtpSend } from '../../src/smtp/sender.js';
+import type { Composition, DraftPatch } from '../../src/mail/write-types.js';
 
 const ACCOUNT: Account = {
   id: 'work',
@@ -24,7 +30,7 @@ const ACCOUNT: Account = {
   signature: undefined,
   imap: { host: 'mail.example.org', port: 993 },
   smtp: { host: 'mail.example.org', port: 465 },
-  mailboxes: { drafts: 'Drafts', trash: 'Trash' },
+  mailboxes: { drafts: 'Drafts', sent: 'Sent', trash: 'Trash' },
 };
 
 const STORED = Buffer.from(
@@ -49,6 +55,7 @@ interface FakeOptions {
   deleteResult?: boolean | 'throw';
   moveResult?: CopyResponseObject | false;
   storeResult?: boolean;
+  appendResult?: AppendResponseObject | false;
 }
 
 interface Fake {
@@ -86,7 +93,7 @@ function fakeWith(options: FakeOptions): Fake {
     append: (path: string) => {
       calls.push('append');
       const res: AppendResponseObject = { destination: path, uid: 5, uidValidity: 9n };
-      return Promise.resolve(res);
+      return Promise.resolve(options.appendResult ?? res);
     },
     search: () => {
       calls.push('search');
@@ -124,13 +131,36 @@ function fakeWith(options: FakeOptions): Fake {
 
 const UNUSED_READER = {} as MailProvider;
 
-function writer(fake: Fake): ImapMailWriter {
+function writer(fake: Fake, smtp: SmtpSend = () => Promise.resolve()): ImapMailWriter {
   return new ImapMailWriter(
     ACCOUNT,
     new ImapPool(() => Promise.resolve(fake.client)),
     UNUSED_READER,
-    () => Promise.resolve(),
+    smtp,
   );
+}
+
+const MESSAGE: Composition = {
+  to: ['bob@example.org'],
+  cc: [],
+  bcc: [],
+  subject: 'Hi',
+  body: 'x',
+  htmlBody: undefined,
+  attachments: [],
+  includeSignature: false,
+};
+
+/** An SmtpSend that records how often it was called. */
+function countingSmtp(): { send: SmtpSend; calls: () => number } {
+  let count = 0;
+  return {
+    send: () => {
+      count += 1;
+      return Promise.resolve();
+    },
+    calls: () => count,
+  };
 }
 
 const CHANGES = ['append', 'messageDelete', 'messageMove', 'messageFlagsAdd', 'messageFlagsRemove'];
@@ -258,5 +288,66 @@ describe('ImapMailWriter.deleteDraft', () => {
     const out = await writer(fake).deleteDraft(REF);
     expect(out.messageIds).toEqual([]);
     expect(out.warnings).toHaveLength(1);
+  });
+});
+
+describe('ImapMailWriter.send', () => {
+  it('writes nothing when SMTP fails', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const failing: SmtpSend = () => Promise.reject(new MailError('send_failed', 'refused'));
+    await expect(writer(fake, failing).send(MESSAGE)).rejects.toMatchObject({
+      code: 'send_failed',
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('sends nothing without a recipient', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const smtp = countingSmtp();
+    await expect(writer(fake, smtp.send).send({ ...MESSAGE, to: [] })).rejects.toMatchObject({
+      code: 'send_failed',
+    });
+    expect(smtp.calls()).toBe(0);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('stores a sent copy and returns its id', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const out = await writer(fake).send(MESSAGE);
+    expect(out.sentCopyId).not.toBeNull();
+    expect(out.warnings).toEqual([]);
+    expect(out.messageIdHeader).toMatch(/^<.+@example\.org>$/);
+  });
+
+  it('reports a failed sent copy as a warning', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], appendResult: false });
+    const out = await writer(fake).send(MESSAGE);
+    expect(out.sentCopyId).toBeNull();
+    expect(out.warnings).toEqual([SENT_COPY_FAILED_WARNING]);
+  });
+});
+
+describe('ImapMailWriter.sendDraft', () => {
+  it('sends a draft only with UIDPLUS', async () => {
+    const fake = fakeWith({ capabilities: ['MOVE'] });
+    const smtp = countingSmtp();
+    await expect(writer(fake, smtp.send).sendDraft(REF)).rejects.toMatchObject({
+      code: 'unsupported_server',
+    });
+    expect(smtp.calls()).toBe(0);
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
+  });
+
+  it('removes the draft only after the send', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
+    const order: string[] = [];
+    const smtp: SmtpSend = () => {
+      order.push(...fake.calls.filter((c) => CHANGES.includes(c)), 'smtp');
+      return Promise.resolve();
+    };
+    const out = await writer(fake, smtp).sendDraft(REF);
+    expect(out.warnings).toEqual([]);
+    expect(order).toEqual(['smtp']);
+    expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual(['append', 'messageDelete']);
   });
 });

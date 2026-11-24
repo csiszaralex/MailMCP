@@ -7,7 +7,6 @@ import { requireCapability, unknownMailbox, withMailbox } from '../imap/mailbox-
 import type { ImapPool } from '../imap/pool.js';
 import type { SpecialUse } from '../search/query.js';
 import type { SmtpSend } from '../smtp/sender.js';
-import { replyRecipients } from './addresses.js';
 import { sortedUids } from './imap-provider.js';
 import {
   ARCHIVE,
@@ -16,48 +15,52 @@ import {
   gmailLabelChange,
   type FlagChange,
 } from './label-plan.js';
-import {
-  buildMime,
-  decodeAttachments,
-  newMessageId,
-  prefixSubject,
-  quoteReply,
-  withSignature,
-  type MimeSpec,
-  type QuotedOriginal,
-} from './compose.js';
+import { buildMime, decodeAttachments, type MimeSpec } from './compose.js';
 import { messageThreadId, referenceIds, threadIdFields, toAddresses } from './message-parts.js';
+import {
+  accountSpec,
+  envelopeFor,
+  forwardSpec,
+  plainAddresses,
+  quotedOriginal,
+  replyBody,
+  replyContext,
+  replySpec,
+  sendSpec,
+  signedBody,
+  type ReplyContext,
+} from './outgoing.js';
 import { assertCurrent, assertOwnAccount, messageGone } from './ref-checks.js';
 import { readStored } from './stored.js';
 import { threadLocation } from './thread-locate.js';
-import type { Address, MailProvider } from './types.js';
+import type { MailProvider } from './types.js';
 import type {
   Composition,
   DraftOutcome,
   DraftPatch,
+  ForwardInput,
   LabelAction,
   LabelChange,
   MailWriter,
   MoveOutcome,
+  ReplyInput,
+  SendOutcome,
   WriteTarget,
 } from './write-types.js';
 
 export const OLD_DRAFT_KEPT_WARNING =
   'The previous version of the draft could not be removed; delete it with delete_draft.';
 
-const DRAFT_FLAGS = ['\\Draft', '\\Seen'];
+export const SENT_COPY_FAILED_WARNING =
+  'The message was sent, but its copy could not be stored in the Sent mailbox.';
 
-/** What a reply (a reply draft, or reply()) takes from the original message (D19). */
-interface ReplyContext {
-  quoted: QuotedOriginal;
-  /** `Re:` plus the original subject. */
-  subject: string;
-  inReplyTo: string | undefined;
-  references: string[];
-  /** Never empty: without other recipients the reply goes to the account itself (R3). */
-  to: Address[];
-  cc: Address[];
-}
+export const SENT_COPY_WITHOUT_ID_WARNING =
+  'The message was sent and copied to the Sent mailbox, but the server reported no id for the copy.';
+
+export const SENT_DRAFT_KEPT_WARNING =
+  'The message was sent, but the draft could not be removed; delete it with delete_draft.';
+
+const DRAFT_FLAGS = ['\\Draft', '\\Seen'];
 
 /** Where untrash and unmark_spam move to: All Mail on Gmail, INBOX elsewhere (D24). */
 const RESTORE = Symbol('restore');
@@ -68,31 +71,12 @@ const RESTORE_SOURCES = {
   '\\Junk': 'This message is not in spam; search in:spam for its current id.',
 } as const;
 
-/** Tool input addresses are bare e-mail addresses (the tool schema validates them). */
-function plainAddresses(list: string[]): Address[] {
-  return list.map((address) => ({ name: '', address }));
-}
-
-export class ImapMailWriter implements Pick<
-  MailWriter,
-  | 'account'
-  | 'createDraft'
-  | 'updateDraft'
-  | 'deleteDraft'
-  | 'updateLabels'
-  | 'manageLabel'
-  | 'trash'
-  | 'untrash'
-  | 'markSpam'
-  | 'unmarkSpam'
-> {
+export class ImapMailWriter implements MailWriter {
   constructor(
     readonly account: Account,
     private readonly pool: ImapPool,
     private readonly reader: MailProvider,
-    // protected, not private: nothing reads it until sending exists, and noUnusedLocals
-    // rejects an unread private property.
-    protected readonly smtp: SmtpSend,
+    private readonly smtp: SmtpSend,
   ) {}
 
   async createDraft(c: Composition, replyTo: MessageRef | undefined): Promise<DraftOutcome> {
@@ -105,16 +89,12 @@ export class ImapMailWriter implements Pick<
       reply !== undefined && c.to.length + c.cc.length + c.bcc.length === 0
         ? { to: reply.to, cc: reply.cc }
         : { to: plainAddresses(c.to), cc: plainAddresses(c.cc) };
-    // A draft without any body still gets its signature and quote.
-    const text = c.body === undefined && c.htmlBody === undefined ? '' : c.body;
-    const signed = withSignature(
-      text,
-      c.htmlBody,
-      c.includeSignature ? this.account.signature : undefined,
-    );
-    const body = reply === undefined ? signed : quoteReply(reply.quoted, signed.text, signed.html);
+    const body =
+      reply === undefined
+        ? signedBody(this.account, c.body, c.htmlBody, c.includeSignature)
+        : replyBody(this.account, reply, c.body, c.htmlBody, c.includeSignature);
     const raw = await buildMime(
-      this.#spec({
+      accountSpec(this.account, {
         ...recipients,
         bcc: plainAddresses(c.bcc),
         subject: c.subject === '' && reply !== undefined ? reply.subject : c.subject,
@@ -152,7 +132,7 @@ export class ImapMailWriter implements Pick<
           // A new body replaces the old one in both forms: body without htmlBody drops the HTML.
           const bodyGiven = patch.body !== undefined || patch.htmlBody !== undefined;
           const raw = await buildMime(
-            this.#spec({
+            accountSpec(this.account, {
               to: patch.to === undefined ? stored.to : plainAddresses(patch.to),
               cc: patch.cc === undefined ? stored.cc : plainAddresses(patch.cc),
               bcc: patch.bcc === undefined ? stored.bcc : plainAddresses(patch.bcc),
@@ -193,6 +173,61 @@ export class ImapMailWriter implements Pick<
         },
       );
     });
+  }
+
+  send(c: Composition): Promise<SendOutcome> {
+    return this.#deliver(sendSpec(this.account, c));
+  }
+
+  async sendDraft(ref: MessageRef): Promise<SendOutcome> {
+    assertOwnAccount(this.account, ref.account);
+    const spec = await this.pool.use(this.account, async (client) => {
+      // Before the send: removing the sent draft needs UID EXPUNGE (D17).
+      requireCapability(client, 'UIDPLUS', 'send with draftId');
+      // The draft is expunged after the send, so an id outside the drafts mailbox must never get there.
+      await this.#assertDraft(client, ref);
+      return withMailbox(
+        client,
+        ref.mailbox,
+        { access: 'read', from: 'id' },
+        async (uidValidity) => {
+          assertCurrent(ref, uidValidity);
+          // Rebuilt from its fields: the draft's Bcc goes to the envelope and the Sent copy, never to recipients.
+          const stored = await readStored(client, ref);
+          return accountSpec(this.account, {
+            to: stored.to,
+            cc: stored.cc,
+            bcc: stored.bcc,
+            subject: stored.subject,
+            text: stored.text,
+            html: stored.html,
+            attachments: stored.attachments,
+            inReplyTo: stored.inReplyTo,
+            references: stored.references,
+          });
+        },
+      );
+    });
+    return this.#deliver(spec, ref);
+  }
+
+  async reply(ref: MessageRef, input: ReplyInput): Promise<SendOutcome> {
+    const context = await this.#replyContext(ref, input.htmlBody !== undefined, input.replyAll);
+    return this.#deliver(replySpec(this.account, context, input));
+  }
+
+  async forward(ref: MessageRef, input: ForwardInput): Promise<SendOutcome> {
+    assertOwnAccount(this.account, ref.account);
+    // The whole original, within the size limit: its full text and every attachment go along.
+    const stored = await this.pool.use(this.account, (client) =>
+      withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
+        assertCurrent(ref, uidValidity);
+        return readStored(client, ref);
+      }),
+    );
+    const original = await this.reader.getMessage(ref, 'metadata');
+    const quoted = quotedOriginal(original, stored.text, stored.html);
+    return this.#deliver(forwardSpec(this.account, quoted, stored.attachments, input));
   }
 
   updateLabels(target: WriteTarget, change: LabelChange): Promise<MoveOutcome> {
@@ -409,16 +444,6 @@ export class ImapMailWriter implements Pick<
     );
   }
 
-  /** The MIME spec of a message from this account: From is always the account's own address (R5). */
-  #spec(fields: Omit<MimeSpec, 'from' | 'messageId' | 'date'>): MimeSpec {
-    return {
-      ...fields,
-      from: this.account.address,
-      messageId: newMessageId(this.account),
-      date: new Date(),
-    };
-  }
-
   #draftsPath(client: ImapClient): Promise<string> {
     return this.#special(client, '\\Drafts');
   }
@@ -529,26 +554,61 @@ export class ImapMailWriter implements Pick<
     const html = withHtml
       ? ((await this.reader.getMessage(ref, 'html')).body ?? undefined)
       : undefined;
-    const recipients = replyRecipients(
-      { from: original.from, to: original.to, cc: original.cc, replyTo: headers.replyTo },
-      this.account,
-      replyAll,
+    return replyContext(this.account, original, html, headers, replyAll);
+  }
+
+  /**
+   * Sends `spec` (D18): SMTP gets it without the Bcc header, the envelope names every recipient.
+   * Only a successful send writes to IMAP: the Sent copy (not on Gmail, whose SMTP stores it) and
+   * the removal of `removeDraft`. Either failing is a warning, never an error: the mail is sent.
+   */
+  async #deliver(spec: MimeSpec, removeDraft?: MessageRef): Promise<SendOutcome> {
+    const envelope = envelopeFor(spec);
+    await this.smtp(this.account, await buildMime(spec, { keepBcc: false }), envelope);
+    const warnings: string[] = [];
+    let sentCopyId: string | null = null;
+    if (this.account.provider !== 'gmail') {
+      try {
+        sentCopyId = await this.#storeSentCopy(spec);
+        if (sentCopyId === null) warnings.push(SENT_COPY_WITHOUT_ID_WARNING);
+      } catch {
+        warnings.push(SENT_COPY_FAILED_WARNING);
+      }
+    }
+    if (removeDraft !== undefined && !(await this.#removeDraft(removeDraft).catch(() => false))) {
+      warnings.push(SENT_DRAFT_KEPT_WARNING);
+    }
+    return { messageIdHeader: spec.messageId, sentCopyId, warnings };
+  }
+
+  /** APPENDs the sent message, Bcc included, to the Sent mailbox; null when it got no id. */
+  #storeSentCopy(spec: MimeSpec): Promise<string | null> {
+    return this.pool.use(this.account, async (client) => {
+      const path = await this.#special(client, '\\Sent');
+      const raw = await buildMime(spec, { keepBcc: true });
+      const appended = await client.append(path, raw, ['\\Seen']);
+      // A NO throws; imapflow answers false when it could not issue the APPEND at all.
+      if (appended === false) throw new Error(`The server refused the APPEND to "${path}".`);
+      // APPENDUID carries both; without it the copy is stored but has no id.
+      if (appended.uid === undefined || appended.uidValidity === undefined) return null;
+      return encodeMessageId({
+        account: this.account.id,
+        mailbox: path,
+        uidValidity: appended.uidValidity.toString(),
+        uid: appended.uid,
+      });
+    });
+  }
+
+  /** Removes a sent draft with UID EXPUNGE (D17); false when the server did not. */
+  #removeDraft(ref: MessageRef): Promise<boolean> {
+    return this.pool.use(this.account, (client) =>
+      withMailbox(client, ref.mailbox, { access: 'write', from: 'id' }, async (uidValidity) => {
+        assertCurrent(ref, uidValidity);
+        // Checked before the send too; again here, since a plain EXPUNGE would hit other mail.
+        requireCapability(client, 'UIDPLUS', 'send with draftId');
+        return client.messageDelete(String(ref.uid), { uid: true });
+      }),
     );
-    const { messageId } = headers;
-    return {
-      quoted: {
-        from: original.from,
-        date: original.date,
-        subject: original.subject,
-        to: original.to,
-        text: original.body ?? '',
-        html,
-      },
-      subject: prefixSubject('Re:', original.subject),
-      inReplyTo: messageId,
-      references: messageId === undefined ? headers.references : [...headers.references, messageId],
-      to: recipients.to.length > 0 ? recipients.to : [{ name: '', address: this.account.address }],
-      cc: recipients.cc,
-    };
   }
 }

@@ -4,7 +4,14 @@ import { decodeMessageId, decodeThreadId, type MessageRef } from '../../src/ids.
 import { ImapPool } from '../../src/imap/pool.js';
 import { ImapMailProvider } from '../../src/mail/imap-provider.js';
 import { ImapMailWriter } from '../../src/mail/imap-writer.js';
-import type { Composition, MoveOutcome, WriteTarget } from '../../src/mail/write-types.js';
+import type {
+  Composition,
+  ForwardInput,
+  MoveOutcome,
+  ReplyInput,
+  WriteTarget,
+} from '../../src/mail/write-types.js';
+import type { Envelope, SmtpSend } from '../../src/smtp/sender.js';
 import { seed, startGreenMail, WRITE_MAILBOXES, type GreenMail } from './greenmail.js';
 
 let gm: GreenMail;
@@ -12,6 +19,8 @@ let pool: ImapPool;
 let account: Account;
 let reader: ImapMailProvider;
 let writer: ImapMailWriter;
+/** Reads bob's mailbox, where alice's sent mail arrives. */
+let bobReader: ImapMailProvider;
 
 beforeAll(async () => {
   gm = await startGreenMail();
@@ -20,6 +29,7 @@ beforeAll(async () => {
   account = { ...gm.account, mailboxes: WRITE_MAILBOXES };
   reader = new ImapMailProvider(account, pool);
   writer = new ImapMailWriter(account, pool, reader, gm.send);
+  bobReader = new ImapMailProvider(gm.bob, pool);
 });
 
 afterAll(async () => {
@@ -462,5 +472,182 @@ describe('manageLabel', () => {
     await expect(writer.manageLabel({ action: 'delete', name: 'Nowhere' })).rejects.toMatchObject({
       code: 'mailbox_not_found',
     });
+  });
+});
+
+function replyInput(fields: Partial<ReplyInput>): ReplyInput {
+  return {
+    body: undefined,
+    htmlBody: undefined,
+    attachments: [],
+    includeSignature: false,
+    replyAll: false,
+    to: undefined,
+    cc: undefined,
+    bcc: [],
+    ...fields,
+  };
+}
+
+function forwardInput(fields: Partial<ForwardInput>): ForwardInput {
+  return {
+    to: [],
+    cc: [],
+    bcc: [],
+    forwardText: undefined,
+    htmlBody: undefined,
+    attachments: [],
+    includeSignature: false,
+    ...fields,
+  };
+}
+
+/** The one message bob received with exactly this subject. */
+async function receivedByBob(subject: string): Promise<MessageRef> {
+  const found = (await bobReader.search(`subject:"${subject}"`, 0, 10)).messages.filter(
+    (m) => m.subject === subject,
+  );
+  expect(found).toHaveLength(1);
+  const [only] = found;
+  if (only === undefined) throw new Error(`bob did not receive "${subject}"`);
+  return decodeMessageId(only.id);
+}
+
+/** A writer whose SMTP records every envelope before delivering through GreenMail. */
+function recordingWriter(): { writer: ImapMailWriter; envelopes: Envelope[] } {
+  const envelopes: Envelope[] = [];
+  const send: SmtpSend = (acc, raw, envelope) => {
+    envelopes.push(envelope);
+    return gm.send(acc, raw, envelope);
+  };
+  return { writer: new ImapMailWriter(account, pool, reader, send), envelopes };
+}
+
+describe('send', () => {
+  it('delivers without Bcc and keeps Bcc in the sent copy', async () => {
+    const out = await writer.send(
+      composition({
+        to: ['bob@example.com'],
+        bcc: ['alice@example.com'],
+        subject: 'Hello Bob',
+        body: 'Hi',
+      }),
+    );
+    expect(out.warnings).toEqual([]);
+    const raw = await bobReader.getMessage(await receivedByBob('Hello Bob'), 'raw');
+    expect(raw.body).not.toMatch(/^Bcc:/im);
+    expect(raw.body).toContain(`Message-ID: ${out.messageIdHeader}`);
+    if (out.sentCopyId === null) throw new Error('no sent copy');
+    const copyRef = decodeMessageId(out.sentCopyId);
+    expect(copyRef.mailbox).toBe('Sent');
+    const copy = await reader.getMessage(copyRef, 'raw');
+    expect(copy.body).toMatch(/^Bcc: alice@example\.com/im);
+    expect(copy.flags).toContain('\\Seen');
+  });
+
+  it('delivers to the Bcc recipient through the envelope', async () => {
+    const recording = recordingWriter();
+    await recording.writer.send(
+      composition({
+        to: ['bob@example.com'],
+        cc: ['carol@example.com'],
+        bcc: ['dave@example.com'],
+        subject: 'Envelope check',
+        body: 'Hi',
+      }),
+    );
+    expect(recording.envelopes).toEqual([
+      {
+        from: 'alice@example.com',
+        to: ['bob@example.com', 'carol@example.com', 'dave@example.com'],
+      },
+    ]);
+  });
+});
+
+describe('sendDraft', () => {
+  it('sends a draft and removes it', async () => {
+    const draft = await writer.createDraft(
+      composition({
+        to: ['bob@example.com'],
+        bcc: ['dave@example.com'],
+        subject: 'Draft to send',
+        body: 'From the drafts',
+      }),
+      undefined,
+    );
+    const out = await writer.sendDraft(decodeMessageId(draft.draftId));
+    expect(out.warnings).toEqual([]);
+    const received = await bobReader.getMessage(await receivedByBob('Draft to send'), 'raw');
+    expect(received.body).toContain('From the drafts');
+    expect(received.body).not.toMatch(/^Bcc:/im);
+    expect(await subjectsIn('in:drafts')).not.toContain('Draft to send');
+    expect(await subjectsIn('in:sent')).toContain('Draft to send');
+  });
+
+  it('refuses a message outside the drafts mailbox and leaves it in place', async () => {
+    const ref = await freshRef('INBOX', 'Not a draft to send');
+    await expect(writer.sendDraft(ref)).rejects.toMatchObject({ code: 'not_found' });
+    expect((await reader.getMessage(ref, 'metadata')).subject).toBe('Not a draft to send');
+  });
+});
+
+describe('reply', () => {
+  it('replies in the thread with quoting', async () => {
+    const original = await inboxRef('Invoice 2026-11');
+    const out = await writer.reply(original, replyInput({ body: 'Paid today.' }));
+    expect(out.warnings).toEqual([]);
+    const ref = await receivedByBob('Re: Invoice 2026-11');
+    const received = await bobReader.getMessage(ref, 'plain');
+    expect(received.inReplyTo).toBe('<m1@example.com>');
+    expect(received.body).toContain('Paid today.');
+    expect(received.body).toContain('> Please find the invoice attached.');
+    const raw = await bobReader.getMessage(ref, 'raw');
+    expect(raw.body).toContain('References: <m1@example.com>');
+  });
+
+  it('reply all skips our own plus address', async () => {
+    const client = await gm.connect(gm.account);
+    try {
+      const team = [
+        'From: Bob <bob@example.com>',
+        'To: alice+x@example.com, Carol <carol@example.com>',
+        'Subject: Team plan',
+        'Message-ID: <team1@example.com>',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'Who joins?',
+        '',
+      ].join('\r\n');
+      await client.append('INBOX', Buffer.from(team), ['\\Seen']);
+    } finally {
+      await client.logout();
+    }
+    const recording = recordingWriter();
+    await recording.writer.reply(
+      await inboxRef('Team plan'),
+      replyInput({ body: 'Me.', replyAll: true }),
+    );
+    expect(recording.envelopes).toEqual([
+      { from: 'alice@example.com', to: ['bob@example.com', 'carol@example.com'] },
+    ]);
+  });
+});
+
+describe('forward', () => {
+  it('forwards with the original attachment', async () => {
+    const original = await inboxRef('Invoice 2026-11');
+    const out = await writer.forward(
+      original,
+      forwardInput({ to: ['bob@example.com'], forwardText: 'FYI' }),
+    );
+    expect(out.warnings).toEqual([]);
+    const ref = await receivedByBob('Fwd: Invoice 2026-11');
+    const received = await bobReader.getMessage(ref, 'plain');
+    expect(received.attachments.map((a) => a.filename)).toEqual(['invoice.pdf']);
+    expect(received.inReplyTo).toBeNull();
+    expect(received.body).toContain('FYI');
+    expect(received.body).toContain('---------- Forwarded message ---------');
+    expect(received.body).toContain('Please find the invoice attached.');
   });
 });

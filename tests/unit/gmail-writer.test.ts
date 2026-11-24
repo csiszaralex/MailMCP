@@ -13,6 +13,7 @@ import { ImapPool } from '../../src/imap/pool.js';
 import { ImapMailWriter } from '../../src/mail/imap-writer.js';
 import type { MailProvider } from '../../src/mail/types.js';
 import type { WriteTarget } from '../../src/mail/write-types.js';
+import type { SmtpSend } from '../../src/smtp/sender.js';
 
 const ACCOUNT: Account = {
   id: 'personal',
@@ -89,6 +90,10 @@ function fakeGmail(capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'], s
       calls.push('mailboxDelete');
       return Promise.resolve({ path });
     },
+    append: () => {
+      calls.push('append');
+      return Promise.resolve(false);
+    },
     status: () => {
       calls.push('status');
       return Promise.resolve({ path: 'Work', messages: 12 });
@@ -99,12 +104,15 @@ function fakeGmail(capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'], s
   return { client, stores, moves, searches, calls };
 }
 
-function writerFor(fake: { client: ImapClient }): ImapMailWriter {
+function writerFor(
+  fake: { client: ImapClient },
+  smtp: SmtpSend = () => Promise.resolve(),
+): ImapMailWriter {
   return new ImapMailWriter(
     ACCOUNT,
     new ImapPool(() => Promise.resolve(fake.client)),
     {} as MailProvider,
-    () => Promise.resolve(),
+    smtp,
   );
 }
 
@@ -236,5 +244,29 @@ describe('ImapMailWriter on Gmail', () => {
       writerFor(fake).manageLabel({ action: 'rename', name: 'INBOX', newName: 'Old' }),
     ).rejects.toMatchObject({ code: 'not_permitted' });
     expect(fake.calls).toEqual([]);
+  });
+
+  it('keeps no sent copy for Gmail', async () => {
+    const fake = fakeGmail();
+    let sent = 0;
+    const smtp: SmtpSend = () => {
+      sent += 1;
+      return Promise.resolve();
+    };
+    const out = await writerFor(fake, smtp).send({
+      to: ['friend@example.com'],
+      cc: [],
+      bcc: [],
+      subject: 'Hi',
+      body: 'x',
+      htmlBody: undefined,
+      attachments: [],
+      includeSignature: false,
+    });
+    expect(sent).toBe(1);
+    // Gmail SMTP stores the sent message itself (D18).
+    expect(fake.calls).toEqual([]);
+    expect(out.sentCopyId).toBeNull();
+    expect(out.warnings).toEqual([]);
   });
 });
