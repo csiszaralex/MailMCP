@@ -339,6 +339,14 @@ describe('ImapMailWriter.deleteDraft', () => {
     expect(out.warnings).toEqual([]);
   });
 
+  it('reports a refused move as update_failed', async () => {
+    const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], moveResult: false });
+    await expect(writer(fake).deleteDraft(REF)).rejects.toMatchObject({
+      code: 'update_failed',
+      message: 'The mail server refused to move the messages from "Drafts" to "Trash".',
+    });
+  });
+
   it('warns about a message the uid map does not list', async () => {
     const fake = fakeWith({
       capabilities: ['UIDPLUS', 'MOVE'],

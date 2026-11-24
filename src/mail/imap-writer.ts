@@ -515,8 +515,12 @@ export class ImapMailWriter implements MailWriter {
     destination: string,
   ): Promise<MoveOutcome> {
     const result = await client.messageMove(uids.join(','), destination, { uid: true });
+    // imapflow answers false, without throwing, when the server refuses the MOVE.
     if (result === false) {
-      throw new Error(`The server refused to move messages from "${path}" to "${destination}".`);
+      throw new MailError(
+        'update_failed',
+        `The mail server refused to move the messages from "${path}" to "${destination}".`,
+      );
     }
     // COPYUID carries both; without it no new id can be formed.
     const uidValidity = result.uidValidity?.toString();
