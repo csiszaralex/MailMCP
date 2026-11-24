@@ -27,7 +27,8 @@ import {
   type ToolScope,
 } from './scope.js';
 
-// The draft-level tools (D15, D16, D22-D24): every one of them can be undone.
+// The draft-level tools (D15, D16, D22-D24): none sends mail or loses a message. update_draft
+// replaces a draft with its new version; manage_label deletes only an empty label or folder.
 
 const WRITE = { readOnlyHint: false, openWorldHint: true, destructiveHint: false } as const;
 
@@ -155,7 +156,7 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
   };
   const labelMeta = {
     title: 'Create, rename or delete a label',
-    description: `Creates, renames or deletes a Gmail label or, on other accounts, a folder. INBOX and special folders (Sent, Trash...) cannot be renamed or deleted. Deleting a Gmail label keeps its messages; a folder on other accounts can only be deleted when empty. ${UNTRUSTED_NOTE}`,
+    description: `Creates, renames or deletes a Gmail label or, on other accounts, a folder. INBOX and special folders (Sent, Trash...) cannot be renamed or deleted. A label or folder can only be deleted when no message is in it (on Gmail, first remove the label from its messages with update_labels). ${UNTRUSTED_NOTE}`,
     annotations: { ...WRITE, destructiveHint: true },
   };
   const handleLabel = (args: {

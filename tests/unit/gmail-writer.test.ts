@@ -40,7 +40,11 @@ interface Store {
   useLabels: boolean;
 }
 
-function fakeGmail(capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'], storeResult = true) {
+function fakeGmail(
+  capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'],
+  storeResult = true,
+  labelMessages = 12,
+) {
   const stores: Store[] = [];
   const moves: { from: string; range: string; destination: string }[] = [];
   const searches: { mailbox: string; query: SearchObject }[] = [];
@@ -96,7 +100,7 @@ function fakeGmail(capabilities: string[] = ['MOVE', 'UIDPLUS', 'X-GM-EXT-1'], s
     },
     status: () => {
       calls.push('status');
-      return Promise.resolve({ path: 'Work', messages: 12 });
+      return Promise.resolve({ path: 'Work', messages: labelMessages });
     },
     on: () => undefined,
     logout: () => Promise.resolve(),
@@ -228,11 +232,22 @@ describe('ImapMailWriter on Gmail', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('deletes a Gmail label that still holds messages', async () => {
+  it('refuses to delete a Gmail label that still holds messages', async () => {
     const fake = fakeGmail();
+    // Which messages carried the label could not be restored (D23).
+    await expect(
+      writerFor(fake).manageLabel({ action: 'delete', name: 'Work' }),
+    ).rejects.toMatchObject({
+      code: 'not_permitted',
+      message: 'The folder still holds 12 messages; move them out first.',
+    });
+    expect(fake.calls).toEqual(['status']);
+  });
+
+  it('deletes an empty Gmail label', async () => {
+    const fake = fakeGmail(undefined, undefined, 0);
     await writerFor(fake).manageLabel({ action: 'delete', name: 'Work' });
-    // Deleting a Gmail label keeps its messages, so no emptiness check runs (D23).
-    expect(fake.calls).toEqual(['mailboxDelete']);
+    expect(fake.calls).toEqual(['status', 'mailboxDelete']);
   });
 
   it('never deletes or renames a system label', async () => {

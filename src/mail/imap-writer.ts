@@ -272,18 +272,17 @@ export class ImapMailWriter implements MailWriter {
         await client.mailboxRename(box.path, action.newName);
         return;
       }
-      // Deleting an IMAP folder deletes its messages; deleting a Gmail label keeps them (D23).
-      if (this.account.provider !== 'gmail') {
-        const status = await client.status(box.path, { messages: true });
-        if (status === false || status.messages === undefined) {
-          throw new Error(`The server did not report how many messages "${box.path}" holds.`);
-        }
-        if (status.messages > 0) {
-          throw new MailError(
-            'not_permitted',
-            `The folder still holds ${String(status.messages)} messages; move them out first.`,
-          );
-        }
+      // Neither can be undone: deleting an IMAP folder deletes its messages, deleting a Gmail
+      // label loses which messages carried it. So only an empty one is deleted (D23).
+      const status = await client.status(box.path, { messages: true });
+      if (status === false || status.messages === undefined) {
+        throw new Error(`The server did not report how many messages "${box.path}" holds.`);
+      }
+      if (status.messages > 0) {
+        throw new MailError(
+          'not_permitted',
+          `The folder still holds ${String(status.messages)} messages; move them out first.`,
+        );
       }
       await client.mailboxDelete(box.path);
     });
