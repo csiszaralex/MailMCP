@@ -11,6 +11,7 @@ import { authorizationServerMetadata, resourceUrls } from '../../src/auth/resour
 import { TokenService } from '../../src/auth/tokens.js';
 import { totpAt } from '../../src/auth/totp.js';
 import { parseJsonText } from '../../src/boundary.js';
+import type { AuthEventRecord } from '../../src/log.js';
 import { registerOAuthRoutes } from '../../src/http/oauth-routes.js';
 import { Store } from '../../src/store/store.js';
 
@@ -50,6 +51,8 @@ const TokenBody = z.object({
 });
 
 const open: Store[] = [];
+/** The auth events of the app the last setup() built. */
+const logged: AuthEventRecord[] = [];
 
 afterEach(() => {
   for (const store of open.splice(0)) store.close();
@@ -59,7 +62,10 @@ function setup(): Hono {
   const store = Store.open(':memory:');
   open.push(store);
   const clock = (): number => START;
-  const log = (): void => undefined;
+  logged.length = 0;
+  const log = (record: AuthEventRecord): void => {
+    logged.push(record);
+  };
   const fetchFn: typeof fetch = (input) =>
     Promise.resolve(
       input === CLAUDE_CODE_ID
@@ -405,5 +411,27 @@ describe('POST /token', () => {
     const res = await postToken(setup(), { grant_type: 'refresh_token', refresh_token: 'r' });
     expect(res.status).toBe(400);
     expect(await json(res)).toMatchObject({ error: 'invalid_request' });
+  });
+});
+
+describe('auth event log', () => {
+  it('names the client ip on every event of a sign-in, a refresh and a reuse (D37)', async () => {
+    const app = setup();
+    await app.request(authorizeUrl({ client_id: 'https://evil.example/client-metadata' }));
+    const issued = TokenBody.parse(await json(await redeem(app, await codeFor(app))));
+    const fields = {
+      grant_type: 'refresh_token',
+      refresh_token: issued.refresh_token,
+      client_id: CLAUDE_CODE_ID,
+    };
+    await postToken(app, fields);
+    await postToken(app, fields);
+    expect(logged.map((r) => [r.event, r.ip])).toEqual([
+      ['authorize_rejected', '203.0.113.7'],
+      ['login_ok', '203.0.113.7'],
+      ['token_issued', '203.0.113.7'],
+      ['token_refreshed', '203.0.113.7'],
+      ['refresh_reuse', '203.0.113.7'],
+    ]);
   });
 });

@@ -158,7 +158,7 @@ function wrongCode(at: number): string {
 }
 
 async function startLogin(s: Setup, overrides: Overrides<AuthorizeParams> = {}): Promise<string> {
-  const started = await s.flow.start(authorizeParams(overrides));
+  const started = await s.flow.start(authorizeParams(overrides), IP);
   if (started.kind !== 'login') throw new Error(`expected a login page, got ${started.kind}`);
   return started.requestId;
 }
@@ -206,7 +206,7 @@ function grantError(run: () => void): TokenGrantError {
 describe('AuthorizationFlow start', () => {
   it('shows the login page with the client host, redirect host and resource', async () => {
     const s = setup();
-    const started = await s.flow.start(authorizeParams());
+    const started = await s.flow.start(authorizeParams(), IP);
     expect(started).toEqual({
       kind: 'login',
       requestId: expect.stringMatching(/^[A-Za-z0-9_-]+$/) as string,
@@ -225,6 +225,7 @@ describe('AuthorizationFlow start', () => {
     const s = setup();
     const started = await s.flow.start(
       authorizeParams({ client_id: WEB_ID, redirect_uri: WEB_REDIRECT }),
+      IP,
     );
     if (started.kind !== 'login') throw new Error('expected a login page');
     expect(started.view.redirectHost).toBe('claude.com');
@@ -233,7 +234,7 @@ describe('AuthorizationFlow start', () => {
 
   it('accepts a resource with a trailing slash as the known resource', async () => {
     const s = setup();
-    const started = await s.flow.start(authorizeParams({ resource: `${AGGREGATE}/` }));
+    const started = await s.flow.start(authorizeParams({ resource: `${AGGREGATE}/` }), IP);
     if (started.kind !== 'login') throw new Error('expected a login page');
     expect(started.view.resource).toBe(AGGREGATE);
   });
@@ -241,14 +242,17 @@ describe('AuthorizationFlow start', () => {
   it('shows an error page, never a redirect, for a foreign or missing client_id', async () => {
     const s = setup();
     for (const client_id of ['https://evil.example/x', 'http://claude.ai/x', undefined]) {
-      const message = expectErrorPage(await s.flow.start(authorizeParams({ client_id })));
+      const message = expectErrorPage(await s.flow.start(authorizeParams({ client_id }), IP));
       expect(message).toMatch(/client_id/);
     }
   });
 
   it('shows the CIMD error message when the metadata cannot be fetched', async () => {
     const s = setup();
-    const result = await s.flow.start(authorizeParams({ client_id: 'https://claude.ai/missing' }));
+    const result = await s.flow.start(
+      authorizeParams({ client_id: 'https://claude.ai/missing' }),
+      IP,
+    );
     expect(expectErrorPage(result)).toBe('Client metadata from claude.ai answered HTTP 404.');
   });
 
@@ -261,7 +265,7 @@ describe('AuthorizationFlow start', () => {
       'https://evil.example/callback',
       'not a url',
     ]) {
-      const message = expectErrorPage(await s.flow.start(authorizeParams({ redirect_uri })));
+      const message = expectErrorPage(await s.flow.start(authorizeParams({ redirect_uri }), IP));
       expect(message).toMatch(/redirect_uri/);
     }
   });
@@ -274,6 +278,7 @@ describe('AuthorizationFlow start', () => {
         response_type: 'token',
         resource: undefined,
       }),
+      IP,
     );
     expectErrorPage(result);
   });
@@ -281,7 +286,7 @@ describe('AuthorizationFlow start', () => {
   it('redirects with invalid_target, state and iss for an unknown or missing resource', async () => {
     const s = setup();
     for (const resource of ['http://127.0.0.1:8787/mcp/other', undefined]) {
-      const url = expectRedirect(await s.flow.start(authorizeParams({ resource })));
+      const url = expectRedirect(await s.flow.start(authorizeParams({ resource }), IP));
       expect(url.origin + url.pathname).toBe(REDIRECT);
       expect(url.searchParams.get('error')).toBe('invalid_target');
       expect(url.searchParams.get('error_description')).toBeTruthy();
@@ -292,7 +297,7 @@ describe('AuthorizationFlow start', () => {
 
   it('redirects with unsupported_response_type for a response_type other than code', async () => {
     const s = setup();
-    const url = expectRedirect(await s.flow.start(authorizeParams({ response_type: 'token' })));
+    const url = expectRedirect(await s.flow.start(authorizeParams({ response_type: 'token' }), IP));
     expect(url.searchParams.get('error')).toBe('unsupported_response_type');
   });
 
@@ -305,7 +310,7 @@ describe('AuthorizationFlow start', () => {
       { code_challenge: 'too-short' },
       { code_challenge: `${CHALLENGE.slice(0, 42)}+` },
     ]) {
-      const url = expectRedirect(await s.flow.start(authorizeParams(overrides)));
+      const url = expectRedirect(await s.flow.start(authorizeParams(overrides), IP));
       expect(url.searchParams.get('error')).toBe('invalid_request');
     }
   });
@@ -314,14 +319,14 @@ describe('AuthorizationFlow start', () => {
     const s = setup();
     // 'é' is two UTF-8 bytes: the cap counts bytes, not characters.
     for (const state of ['s'.repeat(MAX_STATE_BYTES + 1), 'é'.repeat(MAX_STATE_BYTES / 2 + 1)]) {
-      const url = expectRedirect(await s.flow.start(authorizeParams({ state })));
+      const url = expectRedirect(await s.flow.start(authorizeParams({ state }), IP));
       expect(url.searchParams.get('error')).toBe('invalid_request');
     }
     expect(s.records.at(-1)).toMatchObject({
       event: 'authorize_rejected',
       reason: 'state too long',
     });
-    const ok = await s.flow.start(authorizeParams({ state: 'é'.repeat(MAX_STATE_BYTES / 2) }));
+    const ok = await s.flow.start(authorizeParams({ state: 'é'.repeat(MAX_STATE_BYTES / 2) }), IP);
     expect(ok.kind).toBe('login');
   });
 
@@ -334,6 +339,7 @@ describe('AuthorizationFlow start', () => {
         state: undefined,
         resource: undefined,
       }),
+      IP,
     );
     if (result.kind !== 'redirect') throw new Error('expected a redirect');
     expect(result.location.startsWith(`${WEB_REDIRECT}&`)).toBe(true);
@@ -343,15 +349,15 @@ describe('AuthorizationFlow start', () => {
     expect(url.searchParams.get('iss')).toBe(ISS);
   });
 
-  it('logs every rejection with a fixed reason', async () => {
+  it('logs every rejection with a fixed reason and the client ip', async () => {
     const s = setup();
-    await s.flow.start(authorizeParams({ client_id: 'https://evil.example/x' }));
-    await s.flow.start(authorizeParams({ redirect_uri: 'https://evil.example/cb' }));
-    await s.flow.start(authorizeParams({ resource: 'https://evil.example/r' }));
-    expect(s.records.map((r) => [r.event, r.client, r.reason])).toEqual([
-      ['authorize_rejected', 'evil.example', 'client_id rejected'],
-      ['authorize_rejected', 'claude.ai', 'redirect_uri rejected'],
-      ['authorize_rejected', 'claude.ai', 'resource unknown'],
+    await s.flow.start(authorizeParams({ client_id: 'https://evil.example/x' }), IP);
+    await s.flow.start(authorizeParams({ redirect_uri: 'https://evil.example/cb' }), IP);
+    await s.flow.start(authorizeParams({ resource: 'https://evil.example/r' }), IP);
+    expect(s.records.map((r) => [r.event, r.client, r.reason, r.ip])).toEqual([
+      ['authorize_rejected', 'evil.example', 'client_id rejected', IP],
+      ['authorize_rejected', 'claude.ai', 'redirect_uri rejected', IP],
+      ['authorize_rejected', 'claude.ai', 'resource unknown', IP],
     ]);
   });
 });
@@ -555,7 +561,7 @@ describe('AuthorizationFlow redeem', () => {
   it('issues tokens bound to the requested resource', async () => {
     const s = setup();
     const code = await codeFor(s);
-    const response = s.flow.redeem(redeemParams(code));
+    const response = s.flow.redeem(redeemParams(code), IP);
     expect(response.token_type).toBe('Bearer');
     expect(response.scope).toBe('offline_access');
     const info = await s.tokens.verifyAccessToken(response.access_token);
@@ -566,16 +572,16 @@ describe('AuthorizationFlow redeem', () => {
   it('keeps only the supported scopes', async () => {
     const s = setup();
     const some = await codeFor(s, { scope: 'mail offline_access admin offline_access' });
-    expect(s.flow.redeem(redeemParams(some)).scope).toBe('offline_access');
+    expect(s.flow.redeem(redeemParams(some), IP).scope).toBe('offline_access');
     s.advance(STEP_MS);
     const none = await codeFor(s, { scope: undefined });
-    expect(s.flow.redeem(redeemParams(none)).scope).toBe('');
+    expect(s.flow.redeem(redeemParams(none), IP).scope).toBe('');
   });
 
   it('accepts a matching resource, also with a trailing slash', async () => {
     const s = setup();
     const code = await codeFor(s);
-    expect(() => s.flow.redeem(redeemParams(code, { resource: `${RESOURCE}/` }))).not.toThrow();
+    expect(() => s.flow.redeem(redeemParams(code, { resource: `${RESOURCE}/` }), IP)).not.toThrow();
   });
 
   it('rejects missing parameters with invalid_request', async () => {
@@ -583,9 +589,9 @@ describe('AuthorizationFlow redeem', () => {
     const code = await codeFor(s);
     for (const missing of ['code', 'client_id', 'redirect_uri', 'code_verifier'] as const) {
       const params = redeemParams(code, { [missing]: undefined });
-      expect(grantError(() => s.flow.redeem(params)).code).toBe('invalid_request');
+      expect(grantError(() => s.flow.redeem(params, IP)).code).toBe('invalid_request');
     }
-    expect(() => s.flow.redeem(redeemParams(code))).not.toThrow();
+    expect(() => s.flow.redeem(redeemParams(code), IP)).not.toThrow();
   });
 
   it('rejects a wrong verifier, client, redirect_uri or resource with invalid_grant', async () => {
@@ -600,44 +606,44 @@ describe('AuthorizationFlow redeem', () => {
       { resource: AGGREGATE },
       { code: 'unknown-code' },
     ]) {
-      expect(grantError(() => s.flow.redeem(redeemParams(code, overrides))).code).toBe(
+      expect(grantError(() => s.flow.redeem(redeemParams(code, overrides), IP)).code).toBe(
         'invalid_grant',
       );
     }
     // None of those consumed the code.
-    expect(() => s.flow.redeem(redeemParams(code))).not.toThrow();
+    expect(() => s.flow.redeem(redeemParams(code), IP)).not.toThrow();
   });
 
   it('rejects a code redeemed after 60 seconds', async () => {
     const s = setup();
     const code = await codeFor(s);
     s.advance(MINUTE);
-    expect(grantError(() => s.flow.redeem(redeemParams(code))).code).toBe('invalid_grant');
+    expect(grantError(() => s.flow.redeem(redeemParams(code), IP)).code).toBe('invalid_grant');
   });
 
   it('accepts a code just before its 60 seconds end', async () => {
     const s = setup();
     const code = await codeFor(s);
     s.advance(MINUTE - 1);
-    expect(() => s.flow.redeem(redeemParams(code))).not.toThrow();
+    expect(() => s.flow.redeem(redeemParams(code), IP)).not.toThrow();
   });
 
   it('revokes the first tokens when a code is redeemed a second time', async () => {
     const s = setup();
     const code = await codeFor(s);
-    const first = s.flow.redeem(redeemParams(code));
+    const first = s.flow.redeem(redeemParams(code), IP);
     await expect(s.tokens.verifyAccessToken(first.access_token)).resolves.toBeTruthy();
 
-    expect(grantError(() => s.flow.redeem(redeemParams(code))).code).toBe('invalid_grant');
+    expect(grantError(() => s.flow.redeem(redeemParams(code), IP)).code).toBe('invalid_grant');
     await expect(s.tokens.verifyAccessToken(first.access_token)).rejects.toThrow();
-    expect(grantError(() => s.tokens.refresh(first.refresh_token, CLAUDE_CODE_ID)).code).toBe(
+    expect(grantError(() => s.tokens.refresh(first.refresh_token, CLAUDE_CODE_ID, IP)).code).toBe(
       'invalid_grant',
     );
     expect(s.records.at(-1)).toEqual({
       event: 'code_reuse',
       client: 'claude.ai',
       resource: RESOURCE,
-      ip: null,
+      ip: IP,
       reason: 'code reused',
     });
   });

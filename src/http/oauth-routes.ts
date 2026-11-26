@@ -176,9 +176,12 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
   );
   app.all(`${PROTECTED_RESOURCE_PREFIX}/mcp/:accountId`, () => methodNotAllowed('GET, HEAD'));
 
+  const ipOf = (c: Context): string =>
+    clientIp(c.req.header('x-forwarded-for'), deps.remoteAddress(c), deps.behindProxy);
+
   app.get('/authorize', async (c) => {
     const params: AuthorizeParams = pick(queryFields(c), AUTHORIZE_KEYS);
-    return pageFor(await deps.flow.start(params));
+    return pageFor(await deps.flow.start(params, ipOf(c)));
   });
 
   app.post(
@@ -190,13 +193,12 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
       if (c.req.header('origin') !== deps.publicUrl.origin) return errorPage(FOREIGN_ORIGIN, 403);
       if (!isForm(c)) return errorPage(NOT_A_FORM, 400);
       const form = await formFields(c);
-      const ip = clientIp(c.req.header('x-forwarded-for'), deps.remoteAddress(c), deps.behindProxy);
       return pageFor(
         deps.flow.complete({
           requestId: form.request ?? '',
           password: form.password ?? '',
           totp: form.totp ?? '',
-          ip,
+          ip: ipOf(c),
         }),
       );
     },
@@ -214,16 +216,17 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
         return tokenError('invalid_request', `The body must be ${FORM_TYPE}.`);
       }
       const form = await formFields(c);
+      const ip = ipOf(c);
       try {
         if (form.grant_type === 'authorization_code') {
-          return tokenJson(deps.flow.redeem(pick(form, REDEEM_KEYS)), 200);
+          return tokenJson(deps.flow.redeem(pick(form, REDEEM_KEYS), ip), 200);
         }
         if (form.grant_type === 'refresh_token') {
           const { refresh_token: refreshToken, client_id: clientId } = form;
           if (refreshToken === undefined || clientId === undefined) {
             return tokenError('invalid_request', 'refresh_token and client_id are required.');
           }
-          return tokenJson(deps.tokens.refresh(refreshToken, clientId), 200);
+          return tokenJson(deps.tokens.refresh(refreshToken, clientId, ip), 200);
         }
         return tokenError(
           'unsupported_grant_type',

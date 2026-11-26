@@ -14,6 +14,7 @@ const CLIENT_ID = 'https://claude.ai/oauth/claude-code-client-metadata';
 const OTHER_CLIENT_ID = 'https://claude.com/oauth/other-client-metadata';
 const RESOURCE = 'http://127.0.0.1:8787/mcp/work';
 const START = 1_800_000_000_000;
+const IP = '203.0.113.7';
 
 const open: Store[] = [];
 
@@ -73,7 +74,7 @@ describe('TokenService.issue and verifyAccessToken', () => {
   it('issues a pair that verifies with the client, resource, scopes and expiry', async () => {
     const { tokens, store, records } = setup();
     const id = grant(tokens);
-    const response = tokens.issue(id);
+    const response = tokens.issue(id, IP);
     expect(response).toMatchObject({
       token_type: 'Bearer',
       expires_in: 3600,
@@ -94,13 +95,13 @@ describe('TokenService.issue and verifyAccessToken', () => {
 
     expect(store.listGrants()[0]).toMatchObject({ id, createdAt: START, lastUsedAt: START });
     expect(records).toEqual([
-      { event: 'token_issued', client: 'claude.ai', resource: RESOURCE, ip: null, reason: null },
+      { event: 'token_issued', client: 'claude.ai', resource: RESOURCE, ip: IP, reason: null },
     ]);
   });
 
   it('rejects the access token once 3600 s have passed', async () => {
     const { tokens, setNow } = setup();
-    const { access_token } = tokens.issue(grant(tokens));
+    const { access_token } = tokens.issue(grant(tokens), IP);
     setNow(START + ACCESS_TOKEN_TTL_MS - 1);
     await expect(tokens.verifyAccessToken(access_token)).resolves.toMatchObject({
       clientId: CLIENT_ID,
@@ -111,7 +112,7 @@ describe('TokenService.issue and verifyAccessToken', () => {
 
   it('rejects a refresh token used as an access token', async () => {
     const { tokens } = setup();
-    const { refresh_token } = tokens.issue(grant(tokens));
+    const { refresh_token } = tokens.issue(grant(tokens), IP);
     await rejectsAsInvalidToken(tokens.verifyAccessToken(refresh_token));
   });
 
@@ -124,7 +125,7 @@ describe('TokenService.issue and verifyAccessToken', () => {
 
   it('does not touch the grant when verifying', async () => {
     const { tokens, store, setNow } = setup();
-    const { access_token } = tokens.issue(grant(tokens));
+    const { access_token } = tokens.issue(grant(tokens), IP);
     setNow(START + 1000);
     await tokens.verifyAccessToken(access_token);
     expect(store.listGrants()[0]?.lastUsedAt).toBe(START);
@@ -132,10 +133,10 @@ describe('TokenService.issue and verifyAccessToken', () => {
 
   it('refuses to issue for an unknown or revoked grant', () => {
     const { tokens } = setup();
-    expect(grantError(() => tokens.issue('missing')).code).toBe('invalid_grant');
+    expect(grantError(() => tokens.issue('missing', IP)).code).toBe('invalid_grant');
     const id = grant(tokens);
     tokens.revokeGrant(id);
-    expect(grantError(() => tokens.issue(id)).code).toBe('invalid_grant');
+    expect(grantError(() => tokens.issue(id, IP)).code).toBe('invalid_grant');
   });
 });
 
@@ -143,9 +144,9 @@ describe('TokenService.refresh', () => {
   it('rotates the pair and touches the grant', async () => {
     const { tokens, store, records, setNow } = setup();
     const id = grant(tokens);
-    const first = tokens.issue(id);
+    const first = tokens.issue(id, IP);
     setNow(START + 5000);
-    const second = tokens.refresh(first.refresh_token, CLIENT_ID);
+    const second = tokens.refresh(first.refresh_token, CLIENT_ID, IP);
     expect(second.refresh_token).not.toBe(first.refresh_token);
     expect(second.access_token).not.toBe(first.access_token);
     expect(second).toMatchObject({ expires_in: 3600, scope: 'mail offline_access' });
@@ -158,7 +159,7 @@ describe('TokenService.refresh', () => {
       event: 'token_refreshed',
       client: 'claude.ai',
       resource: RESOURCE,
-      ip: null,
+      ip: IP,
       reason: null,
     });
   });
@@ -166,27 +167,27 @@ describe('TokenService.refresh', () => {
   it('revokes the whole grant when a used refresh token comes back', async () => {
     const { tokens, store, records } = setup();
     const id = grant(tokens);
-    const first = tokens.issue(id);
-    const second = tokens.refresh(first.refresh_token, CLIENT_ID);
+    const first = tokens.issue(id, IP);
+    const second = tokens.refresh(first.refresh_token, CLIENT_ID, IP);
 
-    expect(grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID)).code).toBe(
+    expect(grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
     await rejectsAsInvalidToken(tokens.verifyAccessToken(second.access_token));
     await rejectsAsInvalidToken(tokens.verifyAccessToken(first.access_token));
-    expect(grantError(() => tokens.refresh(second.refresh_token, CLIENT_ID)).code).toBe(
+    expect(grantError(() => tokens.refresh(second.refresh_token, CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
     expect(store.listGrants()[0]?.revokedAt).toBe(START);
     expect(records.filter((r) => r.event === 'refresh_reuse')).toEqual([
-      { event: 'refresh_reuse', client: 'claude.ai', resource: RESOURCE, ip: null, reason: null },
+      { event: 'refresh_reuse', client: 'claude.ai', resource: RESOURCE, ip: IP, reason: null },
     ]);
   });
 
   it('rejects another client without revoking the grant', async () => {
     const { tokens, store } = setup();
-    const first = tokens.issue(grant(tokens));
-    expect(grantError(() => tokens.refresh(first.refresh_token, OTHER_CLIENT_ID)).code).toBe(
+    const first = tokens.issue(grant(tokens), IP);
+    expect(grantError(() => tokens.refresh(first.refresh_token, OTHER_CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
     expect(store.listGrants()[0]?.revokedAt).toBeNull();
@@ -194,14 +195,14 @@ describe('TokenService.refresh', () => {
       clientId: CLIENT_ID,
     });
     // The rejected attempt did not consume the token: the right client can still use it.
-    expect(tokens.refresh(first.refresh_token, CLIENT_ID).token_type).toBe('Bearer');
+    expect(tokens.refresh(first.refresh_token, CLIENT_ID, IP).token_type).toBe('Bearer');
   });
 
   it('rejects a refresh token after 30 days without revoking the grant', () => {
     const { tokens, store, setNow } = setup();
-    const first = tokens.issue(grant(tokens));
+    const first = tokens.issue(grant(tokens), IP);
     setNow(START + REFRESH_TOKEN_TTL_MS);
-    expect(grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID)).code).toBe(
+    expect(grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
     expect(store.listGrants()[0]?.revokedAt).toBeNull();
@@ -209,18 +210,20 @@ describe('TokenService.refresh', () => {
 
   it('accepts a refresh token just before 30 days', () => {
     const { tokens, setNow } = setup();
-    const first = tokens.issue(grant(tokens));
+    const first = tokens.issue(grant(tokens), IP);
     setNow(START + REFRESH_TOKEN_TTL_MS - 1);
-    expect(tokens.refresh(first.refresh_token, CLIENT_ID).token_type).toBe('Bearer');
+    expect(tokens.refresh(first.refresh_token, CLIENT_ID, IP).token_type).toBe('Bearer');
   });
 
   it('rejects an access token or an unknown token as a refresh token', () => {
     const { tokens, store } = setup();
-    const first = tokens.issue(grant(tokens));
-    expect(grantError(() => tokens.refresh(first.access_token, CLIENT_ID)).code).toBe(
+    const first = tokens.issue(grant(tokens), IP);
+    expect(grantError(() => tokens.refresh(first.access_token, CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
-    expect(grantError(() => tokens.refresh('not-a-token', CLIENT_ID)).code).toBe('invalid_grant');
+    expect(grantError(() => tokens.refresh('not-a-token', CLIENT_ID, IP)).code).toBe(
+      'invalid_grant',
+    );
     expect(store.listGrants()[0]?.revokedAt).toBeNull();
   });
 });
@@ -229,11 +232,11 @@ describe('TokenService.revokeGrant', () => {
   it('invalidates both the access and the refresh token', async () => {
     const { tokens } = setup();
     const id = grant(tokens);
-    const pair = tokens.issue(id);
+    const pair = tokens.issue(id, IP);
     expect(tokens.revokeGrant(id)).toBe(true);
     expect(tokens.revokeGrant(id)).toBe(false);
     await rejectsAsInvalidToken(tokens.verifyAccessToken(pair.access_token));
-    expect(grantError(() => tokens.refresh(pair.refresh_token, CLIENT_ID)).code).toBe(
+    expect(grantError(() => tokens.refresh(pair.refresh_token, CLIENT_ID, IP)).code).toBe(
       'invalid_grant',
     );
   });
@@ -242,7 +245,7 @@ describe('TokenService.revokeGrant', () => {
 describe('TokenService secrecy', () => {
   it('stores only the sha256 hex of a token', () => {
     const { tokens, store } = setup();
-    const pair = tokens.issue(grant(tokens));
+    const pair = tokens.issue(grant(tokens), IP);
     expect(store.findToken(pair.access_token)).toBeUndefined();
     expect(store.findToken(pair.refresh_token)).toBeUndefined();
     const hash = createHash('sha256').update(pair.access_token).digest('hex');
@@ -251,12 +254,12 @@ describe('TokenService secrecy', () => {
 
   it('never puts a token or its hash in a log record or an error message', () => {
     const { tokens, records } = setup();
-    const first = tokens.issue(grant(tokens));
-    const second = tokens.refresh(first.refresh_token, CLIENT_ID);
+    const first = tokens.issue(grant(tokens), IP);
+    const second = tokens.refresh(first.refresh_token, CLIENT_ID, IP);
     const messages = [
-      grantError(() => tokens.refresh(second.access_token, CLIENT_ID)).message,
-      grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID)).message,
-      grantError(() => tokens.refresh(second.refresh_token, CLIENT_ID)).message,
+      grantError(() => tokens.refresh(second.access_token, CLIENT_ID, IP)).message,
+      grantError(() => tokens.refresh(first.refresh_token, CLIENT_ID, IP)).message,
+      grantError(() => tokens.refresh(second.refresh_token, CLIENT_ID, IP)).message,
     ];
     const output = JSON.stringify(records) + messages.join('\n');
     for (const token of [

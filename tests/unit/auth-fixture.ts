@@ -16,6 +16,8 @@ import { Store } from '../../src/store/store.js';
 export const PUBLIC_URL = new URL('http://127.0.0.1:8787');
 /** In-process requests carry no Host header (the Node server adds it on the wire). */
 export const LOCAL_HOST = PUBLIC_URL.host;
+/** The peer address every in-process request comes from. */
+export const CLIENT_IP = '203.0.113.7';
 
 export const PASSWORD = 'correct horse battery staple';
 /** The RFC 6238 test key. */
@@ -95,7 +97,7 @@ export function createTestApp(publicUrl: URL = PUBLIC_URL): TestApp {
   });
   const app = createApp(ACCOUNTS, deps, {
     publicUrl,
-    oauth: { flow, tokens, behindProxy: false, remoteAddress: () => '203.0.113.7' },
+    oauth: { flow, tokens, behindProxy: false, remoteAddress: () => CLIENT_IP },
   });
   return {
     app,
@@ -120,5 +122,5 @@ export function accessTokenFor(tokens: TokenService, resource: string): string {
     resource,
     scope: 'offline_access',
   });
-  return tokens.issue(grantId).access_token;
+  return tokens.issue(grantId, CLIENT_IP).access_token;
 }

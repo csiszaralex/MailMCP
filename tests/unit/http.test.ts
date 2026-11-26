@@ -5,6 +5,7 @@ import { MAX_REQUEST_BODY_BYTES } from '../../src/http/app.js';
 import {
   accessTokenFor,
   CLAUDE_CODE_ID,
+  CLIENT_IP,
   createTestApp,
   LOCAL_HOST,
   type TestApp,
@@ -194,7 +195,7 @@ describe('Bearer gate', () => {
       resource: resource('/mcp/a'),
       scope: 'offline_access',
     });
-    const token = test.tokens.issue(grantId).access_token;
+    const token = test.tokens.issue(grantId, CLIENT_IP).access_token;
     test.tokens.revokeGrant(grantId);
     expect((await post(test, '/mcp/a', token)).status).toBe(401);
   });

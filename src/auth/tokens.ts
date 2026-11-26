@@ -69,15 +69,15 @@ export class TokenService implements OAuthTokenVerifier {
     return id;
   }
 
-  /** Issues a new access and refresh token pair for a live grant. */
-  issue(grantId: string): TokenResponse {
+  /** Issues a new access and refresh token pair for a live grant; ip is the client's, for the log. */
+  issue(grantId: string, ip: string): TokenResponse {
     const grant = this.store.findGrant(grantId);
     // An unknown grant has no revokedAt either, so this rejects it too.
     if (grant?.revokedAt !== null) {
       throw new TokenGrantError('invalid_grant', 'The grant is unknown or revoked.');
     }
     const response = this.mint(grant);
-    this.event('token_issued', grant);
+    this.event('token_issued', grant, ip);
     return response;
   }
 
@@ -87,7 +87,7 @@ export class TokenService implements OAuthTokenVerifier {
    * otherwise valid for this client proves reuse. Such a token already used (including by a
    * concurrent request that won the markTokenUsed update) revokes the whole grant.
    */
-  refresh(refreshToken: string, clientId: string): TokenResponse {
+  refresh(refreshToken: string, clientId: string, ip: string): TokenResponse {
     const hash = hashToken(refreshToken);
     const row = this.store.findToken(hash);
     const now = this.clock();
@@ -101,12 +101,12 @@ export class TokenService implements OAuthTokenVerifier {
     }
     if (!this.store.markTokenUsed(hash, now)) {
       this.store.revokeGrant(row.grant.id, now);
-      this.event('refresh_reuse', row.grant);
+      this.event('refresh_reuse', row.grant, ip);
       throw new TokenGrantError('invalid_grant', INVALID_REFRESH_TOKEN);
     }
     this.store.touchGrant(row.grant.id, now);
     const response = this.mint(row.grant);
-    this.event('token_refreshed', row.grant);
+    this.event('token_refreshed', row.grant, ip);
     return response;
   }
 
@@ -149,12 +149,12 @@ export class TokenService implements OAuthTokenVerifier {
     return token;
   }
 
-  private event(event: AuthEventRecord['event'], grant: GrantRow): void {
+  private event(event: AuthEventRecord['event'], grant: GrantRow, ip: string): void {
     this.log({
       event,
       client: clientHost(grant.clientId),
       resource: grant.resource,
-      ip: null,
+      ip,
       reason: null,
     });
   }

@@ -65,7 +65,8 @@ export interface AuthEventRecord {
   /** Host of the client_id URL. */
   client: string | null;
   resource: string | null;
-  ip: string | null;
+  /** The client address as clientIp gives it (D34); 'unknown' when there is none. */
+  ip: string;
   /** Short fixed text, never user input. */
   reason: string | null;
 }

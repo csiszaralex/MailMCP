@@ -198,11 +198,11 @@ export class AuthorizationFlow {
    * GET /authorize. client_id and redirect_uri are verified first; until both are, every error
    * is an error page and never a redirect (D31).
    */
-  async start(params: AuthorizeParams): Promise<StartResult> {
+  async start(params: AuthorizeParams, ip: string): Promise<StartResult> {
     this.prune();
     const clientId = params.client_id;
     if (clientId === undefined || clientId === '') {
-      this.rejected(null, 'client_id rejected');
+      this.rejected(null, ip, 'client_id rejected');
       return { kind: 'error_page', message: MISSING_CLIENT_ID };
     }
     let registered: string[];
@@ -210,7 +210,7 @@ export class AuthorizationFlow {
       registered = (await this.deps.cimd.resolve(clientId)).redirectUris;
     } catch (err) {
       if (!(err instanceof CimdError)) throw err;
-      this.rejected(clientId, 'client_id rejected');
+      this.rejected(clientId, ip, 'client_id rejected');
       return { kind: 'error_page', message: err.message };
     }
     const redirectUri = params.redirect_uri;
@@ -219,12 +219,12 @@ export class AuthorizationFlow {
       !URL.canParse(redirectUri) ||
       !redirectUriAllowed(registered, redirectUri)
     ) {
-      this.rejected(clientId, 'redirect_uri rejected');
+      this.rejected(clientId, ip, 'redirect_uri rejected');
       return { kind: 'error_page', message: BAD_REDIRECT_URI };
     }
 
     const fail = (error: string, description: string, reason: string): StartResult => {
-      this.rejected(clientId, reason);
+      this.rejected(clientId, ip, reason);
       return {
         kind: 'redirect',
         location: withParams(redirectUri, {
@@ -344,7 +344,7 @@ export class AuthorizationFlow {
    * The authorization_code grant (D32). A failed check leaves the code redeemable, so a wrong
    * guess cannot spend the legitimate client's code; a second redemption revokes the grant.
    */
-  redeem(params: RedeemParams): TokenResponse {
+  redeem(params: RedeemParams, ip: string): TokenResponse {
     this.prune();
     const {
       code,
@@ -365,7 +365,7 @@ export class AuthorizationFlow {
     const { binding } = issued;
     if (issued.redeemed) {
       this.deps.tokens.revokeGrant(issued.grantId);
-      this.event('code_reuse', binding, null, 'code reused');
+      this.event('code_reuse', binding, ip, 'code reused');
       throw new TokenGrantError('invalid_grant', INVALID_CODE);
     }
     const valid =
@@ -377,7 +377,7 @@ export class AuthorizationFlow {
     if (!valid) throw new TokenGrantError('invalid_grant', INVALID_CODE);
 
     issued.redeemed = true;
-    return this.deps.tokens.issue(issued.grantId);
+    return this.deps.tokens.issue(issued.grantId, ip);
   }
 
   /** base64url of iv (12 bytes), GCM tag (16 bytes) and the encrypted JSON of the request. */
@@ -436,12 +436,12 @@ export class AuthorizationFlow {
     }
   }
 
-  private rejected(clientId: string | null, reason: string): void {
+  private rejected(clientId: string | null, ip: string, reason: string): void {
     this.deps.log({
       event: 'authorize_rejected',
       client: clientId === null ? null : clientHost(clientId),
       resource: null,
-      ip: null,
+      ip,
       reason,
     });
   }
@@ -449,7 +449,7 @@ export class AuthorizationFlow {
   private event(
     event: AuthEventRecord['event'],
     binding: Binding,
-    ip: string | null,
+    ip: string,
     reason: string | null,
   ): void {
     this.deps.log({
