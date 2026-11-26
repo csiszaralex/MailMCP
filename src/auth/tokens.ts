@@ -45,7 +45,7 @@ function hashToken(token: string): string {
 }
 
 /** The log names the client by the host of its client_id URL, never by the full URL. */
-function clientHost(clientId: string): string | null {
+export function clientHost(clientId: string): string | null {
   return URL.canParse(clientId) ? new URL(clientId).host : null;
 }
 
