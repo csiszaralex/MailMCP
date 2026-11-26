@@ -9,6 +9,14 @@ export const ALLOWED_CLIENT_ORIGINS = ['https://claude.ai', 'https://claude.com'
 export const CIMD_FETCH_TIMEOUT_MS = 5000;
 export const CIMD_MAX_BYTES = 65_536;
 export const CIMD_CACHE_TTL_MS = 10 * 60_000;
+/** D35: a failed fetch is remembered this long, and its error is thrown again meanwhile. */
+export const CIMD_FAILURE_TTL_MS = 60_000;
+/**
+ * D35: fetches running at the same time, over all client ids. Anyone can name any path on an
+ * allowed origin, so a resolve beyond this fails at once instead of queueing.
+ */
+export const CIMD_MAX_CONCURRENT_FETCHES = 4;
+const TOO_MANY_FETCHES = 'Too many client metadata requests, try again.';
 
 export interface ClientMetadata {
   clientId: string;
@@ -88,6 +96,9 @@ export class CimdResolver {
   private readonly fetchFn: typeof fetch;
   private readonly clock: Clock;
   private readonly cache = new Map<string, { metadata: ClientMetadata; expiresAt: number }>();
+  private readonly failures = new Map<string, { error: CimdError; expiresAt: number }>();
+  /** One fetch per client id: concurrent resolves of the same id share it. */
+  private readonly inFlight = new Map<string, Promise<ClientMetadata>>();
 
   constructor(fetchFn: typeof fetch, clock: Clock) {
     this.fetchFn = fetchFn;
@@ -100,12 +111,45 @@ export class CimdResolver {
     if (url === undefined) {
       throw new CimdError('client_id is not an allowed client metadata URL.');
     }
+    const now = this.clock();
     const cached = this.cache.get(clientId);
-    if (cached !== undefined && this.clock() < cached.expiresAt) return cached.metadata;
+    if (cached !== undefined && now < cached.expiresAt) return cached.metadata;
+    const failed = this.failures.get(clientId);
+    if (failed !== undefined && now < failed.expiresAt) throw failed.error;
+    const running = this.inFlight.get(clientId);
+    if (running !== undefined) return running;
+    if (this.inFlight.size >= CIMD_MAX_CONCURRENT_FETCHES) throw new CimdError(TOO_MANY_FETCHES);
 
-    const metadata = await this.fetchMetadata(clientId, url.host);
-    this.cache.set(clientId, { metadata, expiresAt: this.clock() + CIMD_CACHE_TTL_MS });
-    return metadata;
+    this.dropExpired(now);
+    const fetching = this.fetchAndRemember(clientId, url.host);
+    this.inFlight.set(clientId, fetching);
+    return fetching;
+  }
+
+  /** Caches the document or the CimdError; the in-flight entry goes when it settles. */
+  private async fetchAndRemember(clientId: string, host: string): Promise<ClientMetadata> {
+    try {
+      const metadata = await this.fetchMetadata(clientId, host);
+      this.cache.set(clientId, { metadata, expiresAt: this.clock() + CIMD_CACHE_TTL_MS });
+      return metadata;
+    } catch (err) {
+      if (err instanceof CimdError) {
+        this.failures.set(clientId, { error: err, expiresAt: this.clock() + CIMD_FAILURE_TTL_MS });
+      }
+      throw err;
+    } finally {
+      this.inFlight.delete(clientId);
+    }
+  }
+
+  /** Expired entries count as missing; they are dropped before every new fetch. */
+  private dropExpired(now: number): void {
+    for (const [id, entry] of this.cache) {
+      if (entry.expiresAt <= now) this.cache.delete(id);
+    }
+    for (const [id, entry] of this.failures) {
+      if (entry.expiresAt <= now) this.failures.delete(id);
+    }
   }
 
   private async fetchMetadata(clientId: string, host: string): Promise<ClientMetadata> {

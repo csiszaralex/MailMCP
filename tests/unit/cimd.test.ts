@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ALLOWED_CLIENT_ORIGINS,
+  CIMD_FAILURE_TTL_MS,
+  CIMD_MAX_CONCURRENT_FETCHES,
   CimdError,
   type ClientMetadata,
   CimdResolver,
@@ -92,15 +94,75 @@ describe('CimdResolver', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it('does not cache a failure', async () => {
+  it('remembers a failure for 60 seconds and throws the same error meanwhile', async () => {
     let status = 404;
-    const { resolver, fetchFn } = setup(() => jsonResponse(CLAUDE_CODE_DOC, status));
-    await expect(resolver.resolve(CLAUDE_CODE_ID)).rejects.toBeInstanceOf(CimdError);
+    const { resolver, fetchFn, setNow } = setup(() => jsonResponse(CLAUDE_CODE_DOC, status));
+    const first = await cimdFailure(resolver.resolve(CLAUDE_CODE_ID));
     status = 200;
+    setNow(START + CIMD_FAILURE_TTL_MS - 1);
+    expect(await cimdFailure(resolver.resolve(CLAUDE_CODE_ID))).toBe(first);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    setNow(START + CIMD_FAILURE_TTL_MS);
     await expect(resolver.resolve(CLAUDE_CODE_ID)).resolves.toMatchObject({
       clientId: CLAUDE_CODE_ID,
     });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares one fetch between concurrent resolves of the same client id', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const fetchFn = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const resolver = new CimdResolver(fetchFn, () => START);
+    const both = Promise.all([resolver.resolve(CLAUDE_CODE_ID), resolver.resolve(CLAUDE_CODE_ID)]);
+    await vi.waitFor(() => {
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+    release(jsonResponse(CLAUDE_CODE_DOC));
+    const [a, b] = await both;
+    expect(a).toBe(b);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast beyond 4 concurrent fetches and serves the cache meanwhile', async () => {
+    const releases = new Map<string, (response: Response) => void>();
+    const fetchFn = vi.fn<typeof fetch>(
+      (input) =>
+        new Promise<Response>((resolve) => {
+          if (typeof input !== 'string') throw new TypeError('the resolver fetches by string');
+          releases.set(input, resolve);
+        }),
+    );
+    const resolver = new CimdResolver(fetchFn, () => START);
+    const ids = Array.from(
+      { length: CIMD_MAX_CONCURRENT_FETCHES },
+      (_, i) => `https://claude.ai/client-${String(i)}`,
+    );
+    const running = ids.map((id) => resolver.resolve(id));
+    await vi.waitFor(() => {
+      expect(fetchFn).toHaveBeenCalledTimes(CIMD_MAX_CONCURRENT_FETCHES);
+    });
+    const refused = await cimdFailure(resolver.resolve(CLAUDE_CODE_ID));
+    expect(refused.message).toBe('Too many client metadata requests, try again.');
+    expect(fetchFn).toHaveBeenCalledTimes(CIMD_MAX_CONCURRENT_FETCHES);
+    // A refusal for load is not remembered: once a slot is free, the id is fetched.
+    const firstId = ids[0] ?? '';
+    releases.get(firstId)?.(jsonResponse({ ...CLAUDE_CODE_DOC, client_id: firstId }));
+    await expect(running[0]).resolves.toMatchObject({ clientId: firstId });
+    const late = resolver.resolve(CLAUDE_CODE_ID);
+    await vi.waitFor(() => {
+      expect(fetchFn).toHaveBeenCalledTimes(CIMD_MAX_CONCURRENT_FETCHES + 1);
+    });
+    releases.get(CLAUDE_CODE_ID)?.(jsonResponse(CLAUDE_CODE_DOC));
+    await expect(late).resolves.toMatchObject({ clientId: CLAUDE_CODE_ID });
+    // The cached id needs no slot even while the others still run.
+    await expect(resolver.resolve(firstId)).resolves.toMatchObject({ clientId: firstId });
+    for (const id of ids.slice(1)) releases.get(id)?.(new Response('gone', { status: 404 }));
+    await Promise.allSettled(running);
   });
 
   it.each([
