@@ -51,10 +51,44 @@ export interface ConnectionErrorRecord {
 
 export type ConnectionLogger = (record: ConnectionErrorRecord) => void;
 
+/** One OAuth event (D37). Never a token, code, password or TOTP code. */
+export interface AuthEventRecord {
+  event:
+    | 'login_ok'
+    | 'login_failed'
+    | 'login_blocked'
+    | 'authorize_rejected'
+    | 'token_issued'
+    | 'token_refreshed'
+    | 'refresh_reuse'
+    | 'code_reuse';
+  /** Host of the client_id URL. */
+  client: string | null;
+  resource: string | null;
+  /** The client address as clientIp gives it (D34); 'unknown' when there is none. */
+  ip: string;
+  /** Short fixed text, never user input. */
+  reason: string | null;
+}
+
+export type AuthLogger = (record: AuthEventRecord) => void;
+
+/** An error no route handled; the HTTP answer is a generic 500. Never the message or stack. */
+export interface HttpErrorRecord {
+  event: 'http_error';
+  error: ErrorClass;
+}
+
+export type HttpErrorLogger = (record: HttpErrorRecord) => void;
+
 /** One JSON line per record. Never put mail content, passwords or tokens in a record. */
-function writeLine(record: LogRecord | ConnectionErrorRecord): void {
+function writeLine(
+  record: LogRecord | ConnectionErrorRecord | AuthEventRecord | HttpErrorRecord,
+): void {
   process.stderr.write(`${JSON.stringify({ time: new Date().toISOString(), ...record })}\n`);
 }
 
 export const stderrLogger: Logger = writeLine;
 export const stderrConnectionLogger: ConnectionLogger = writeLine;
+export const stderrAuthLogger: AuthLogger = writeLine;
+export const stderrHttpErrorLogger: HttpErrorLogger = writeLine;

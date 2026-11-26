@@ -1,36 +1,39 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createApp, MAX_REQUEST_BODY_BYTES } from '../../src/http/app.js';
-import type { Account } from '../../src/config/types.js';
-import type { ToolDeps } from '../../src/server.js';
-import type { MailProvider } from '../../src/mail/types.js';
+import { ACCESS_TOKEN_TTL_MS } from '../../src/auth/tokens.js';
+import { MAX_REQUEST_BODY_BYTES } from '../../src/http/app.js';
+import {
+  accessTokenFor,
+  CLAUDE_CODE_ID,
+  CLIENT_IP,
+  createTestApp,
+  LOCAL_HOST,
+  type TestApp,
+} from './auth-fixture.js';
 
-const LOCAL_HOST = '127.0.0.1:8787';
+const ORIGIN = 'http://127.0.0.1:8787';
+const resource = (path: string): string => `${ORIGIN}${path}`;
 
-const ACCOUNTS = [
-  { id: 'a', address: 'a@example.org', provider: 'imap', level: 'read' },
-  { id: 'b', address: 'b@example.org', provider: 'imap', level: 'read' },
-] as Account[];
-
-const deps: ToolDeps = {
-  providerFor: (id) =>
-    ({ account: ACCOUNTS.find((a) => a.id === id) }) as Partial<MailProvider> as MailProvider,
-  writerFor: () => {
-    throw new Error('every account is read-only, so no write tool asks for a writer');
-  },
-  log: () => undefined,
-};
-
-const app = createApp(ACCOUNTS, deps);
 const clients: Client[] = [];
+const apps: TestApp[] = [];
 
-async function connect(path: string): Promise<Client> {
-  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:8787${path}`), {
+function setup(publicUrl?: URL): TestApp {
+  const test = createTestApp(publicUrl);
+  apps.push(test);
+  return test;
+}
+
+afterEach(async () => {
+  await Promise.all(clients.splice(0).map((c) => c.close()));
+  for (const test of apps.splice(0)) test.store.close();
+});
+
+async function connect(test: TestApp, path: string, token: string): Promise<Client> {
+  const transport = new StreamableHTTPClientTransport(new URL(resource(path)), {
     fetch: (input, init) => {
-      // In-process requests carry no Host header (the Node server adds it on the wire).
       const request = new Request(input, init);
-      request.headers.set('host', LOCAL_HOST);
-      return Promise.resolve(app.fetch(request));
+      request.headers.set('authorization', `Bearer ${token}`);
+      return test.fetch(request);
     },
   });
   const client = new Client({ name: 'test', version: '0.0.0' });
@@ -39,67 +42,208 @@ async function connect(path: string): Promise<Client> {
   return client;
 }
 
-afterEach(async () => {
-  await Promise.all(clients.splice(0).map((c) => c.close()));
-});
+/** A JSON-RPC POST as an MCP client sends it, with an optional Bearer token. */
+function post(test: TestApp, path: string, token?: string, extra: Record<string, string> = {}) {
+  const headers: Record<string, string> = {
+    host: LOCAL_HOST,
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    ...extra,
+  };
+  if (token !== undefined) headers.authorization = `Bearer ${token}`;
+  return test.app.request(resource(path), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+}
+
+function metadataUrl(path: string): string {
+  return `${ORIGIN}/.well-known/oauth-protected-resource${path}`;
+}
 
 describe('HTTP app', () => {
   it('serves all accounts on /mcp', async () => {
-    const client = await connect('/mcp');
+    const test = setup();
+    const client = await connect(test, '/mcp', accessTokenFor(test.tokens, resource('/mcp')));
     const search = (await client.listTools()).tools.find((t) => t.name === 'search');
     expect(Object.keys(search?.inputSchema.properties ?? {})).toContain('account');
   });
 
   it('serves one account on /mcp/<id>', async () => {
-    const client = await connect('/mcp/b');
+    const test = setup();
+    const client = await connect(test, '/mcp/b', accessTokenFor(test.tokens, resource('/mcp/b')));
     const search = (await client.listTools()).tools.find((t) => t.name === 'search');
     expect(Object.keys(search?.inputSchema.properties ?? {})).not.toContain('account');
   });
 
-  it('returns 404 for unknown accounts and paths', async () => {
+  it('returns 404 for unknown accounts and paths, before asking for a token', async () => {
+    const test = setup();
     const headers = { host: LOCAL_HOST };
-    const unknownAccount = await app.request('http://127.0.0.1:8787/mcp/nope', {
+    const unknownAccount = await test.app.request(resource('/mcp/nope'), {
       method: 'POST',
       headers,
     });
     expect(unknownAccount.status).toBe(404);
-    expect((await app.request('http://127.0.0.1:8787/other', { headers })).status).toBe(404);
+    expect((await test.app.request(resource('/other'), { headers })).status).toBe(404);
   });
 
   it('rejects a foreign Host header (DNS rebinding)', async () => {
-    const response = await app.request('http://evil.example/mcp', {
-      method: 'POST',
-      headers: { host: 'evil.example', 'content-type': 'application/json' },
-      body: '{}',
-    });
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(response.status).not.toBe(404);
-  });
-
-  it('rejects a foreign Origin header', async () => {
-    const response = await app.request('http://127.0.0.1:8787/mcp', {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    const response = await test.app.request('http://evil.example/mcp', {
       method: 'POST',
       headers: {
-        host: LOCAL_HOST,
-        origin: 'http://evil.example',
+        host: 'evil.example',
+        authorization: `Bearer ${token}`,
         'content-type': 'application/json',
       },
       body: '{}',
     });
     expect(response.status).toBe(403);
   });
+
+  it('rejects a foreign Origin header', async () => {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    const response = await post(test, '/mcp', token, { origin: 'http://evil.example' });
+    expect(response.status).toBe(403);
+  });
+
+  it('serves the metadata to a foreign Origin while /mcp still refuses it', async () => {
+    const test = setup();
+    const origin = { origin: 'https://client.example' };
+    for (const path of [
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource/mcp',
+      '/.well-known/oauth-protected-resource/mcp/a',
+    ]) {
+      for (const method of ['GET', 'HEAD']) {
+        const response = await test.fetch(`${ORIGIN}${path}`, { method, headers: origin });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('access-control-allow-origin')).toBe('*');
+      }
+    }
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    expect((await post(test, '/mcp', token, origin)).status).toBe(403);
+    const form = await test.fetch(`${ORIGIN}/token`, {
+      method: 'POST',
+      headers: origin,
+      body: new URLSearchParams({ grant_type: 'refresh_token' }),
+    });
+    expect(form.status).toBe(403);
+  });
+
+  it('checks the Host of a metadata request too', async () => {
+    const test = setup();
+    const response = await test.app.request(`${ORIGIN}/.well-known/oauth-authorization-server`, {
+      headers: { host: 'evil.example' },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects an Origin with our hostname but another port or scheme (D30)', async () => {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    for (const origin of ['http://127.0.0.1:9999', 'https://127.0.0.1:8787', 'null']) {
+      expect((await post(test, '/mcp', token, { origin })).status).toBe(403);
+    }
+    expect((await post(test, '/mcp', token, { origin: ORIGIN })).status).toBe(200);
+  });
+
+  // https, because the SDK's buildOAuthProtectedResourceMetadata accepts an http issuer only for
+  // localhost and 127.0.0.1.
+  it('accepts the Host and Origin of a bracketed IPv6 public URL', async () => {
+    const test = setup(new URL('https://[::1]:8787'));
+    const ipv6 = 'https://[::1]:8787/mcp';
+    const token = accessTokenFor(test.tokens, ipv6);
+    const response = await test.fetch(ipv6, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: 'https://[::1]:8787',
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('Bearer gate', () => {
+  it('answers 401 without a token and points to the endpoint metadata', async () => {
+    const response = await post(setup(), '/mcp/b');
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain(
+      `resource_metadata="${metadataUrl('/mcp/b')}"`,
+    );
+  });
+
+  it('answers 401 for an unknown token', async () => {
+    const response = await post(setup(), '/mcp', 'not-a-token');
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain(
+      `resource_metadata="${metadataUrl('/mcp')}"`,
+    );
+  });
+
+  it('refuses a /mcp/a token on /mcp and on /mcp/b (Review Focus 2)', async () => {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp/a'));
+    expect((await post(test, '/mcp/a', token)).status).toBe(200);
+    const aggregate = await post(test, '/mcp', token);
+    expect(aggregate.status).toBe(401);
+    expect(aggregate.headers.get('www-authenticate')).toContain(
+      `resource_metadata="${metadataUrl('/mcp')}"`,
+    );
+    const other = await post(test, '/mcp/b', token);
+    expect(other.status).toBe(401);
+    expect(other.headers.get('www-authenticate')).toContain(
+      `resource_metadata="${metadataUrl('/mcp/b')}"`,
+    );
+  });
+
+  it('refuses a /mcp token on /mcp/a (Review Focus 2)', async () => {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    expect((await post(test, '/mcp', token)).status).toBe(200);
+    expect((await post(test, '/mcp/a', token)).status).toBe(401);
+  });
+
+  it('refuses an expired token', async () => {
+    const test = setup();
+    const token = accessTokenFor(test.tokens, resource('/mcp/a'));
+    test.advance(ACCESS_TOKEN_TTL_MS + 1000);
+    const response = await post(test, '/mcp/a', token);
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain('error="invalid_token"');
+  });
+
+  it('refuses a token of a revoked grant', async () => {
+    const test = setup();
+    const grantId = test.tokens.createGrant({
+      clientId: CLAUDE_CODE_ID,
+      resource: resource('/mcp/a'),
+      scope: 'offline_access',
+    });
+    const token = test.tokens.issue(grantId, CLIENT_IP).access_token;
+    test.tokens.revokeGrant(grantId);
+    expect((await post(test, '/mcp/a', token)).status).toBe(401);
+  });
 });
 
 describe('request body limit', () => {
-  const headers = {
-    host: LOCAL_HOST,
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
-  };
-  const post = (body: string, extra: Record<string, string> = {}) =>
-    app.request('http://127.0.0.1:8787/mcp', {
+  const postRaw = (test: TestApp, body: string, extra: Record<string, string> = {}) =>
+    test.app.request(resource('/mcp'), {
       method: 'POST',
-      headers: { ...headers, ...extra },
+      headers: {
+        host: LOCAL_HOST,
+        authorization: `Bearer ${accessTokenFor(test.tokens, resource('/mcp'))}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...extra,
+      },
       body,
     });
 
@@ -111,13 +255,54 @@ describe('request body limit', () => {
       method: 'tools/list',
       params: { padding },
     });
-    expect((await post(body)).status).not.toBe(413);
+    expect((await postRaw(setup(), body)).status).not.toBe(413);
   });
 
-  it('answers 413 above MAX_REQUEST_BODY_BYTES', async () => {
-    const response = await post('{}', {
+  it('answers 413 above MAX_REQUEST_BODY_BYTES with a valid token', async () => {
+    const response = await postRaw(setup(), '{}', {
       'content-length': String(MAX_REQUEST_BODY_BYTES + 1),
     });
     expect(response.status).toBe(413);
+  });
+});
+
+describe('unhandled errors', () => {
+  const secret = 'secret value 42';
+
+  it('answers a generic 500 and logs only the error class', async () => {
+    const test = setup();
+    vi.spyOn(test.flow, 'start').mockRejectedValue(new TypeError(secret));
+    const response = await test.fetch(`${ORIGIN}/authorize?client_id=x`);
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).toBe('Internal error');
+    expect(test.httpErrors).toEqual([
+      {
+        event: 'http_error',
+        error: { name: 'TypeError', code: null, responseStatus: null, serverResponseCode: null },
+      },
+    ]);
+    expect(JSON.stringify(test.httpErrors)).not.toContain(secret);
+  });
+
+  it('answers server_error as no-store JSON on /token', async () => {
+    const test = setup();
+    vi.spyOn(test.tokens, 'refresh').mockImplementation(() => {
+      throw new RangeError(secret);
+    });
+    const response = await test.fetch(`${ORIGIN}/token`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: 'r',
+        client_id: CLAUDE_CODE_ID,
+      }),
+    });
+    expect(response.status).toBe(500);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(text).not.toContain(secret);
+    expect(JSON.parse(text)).toMatchObject({ error: 'server_error' });
+    expect(test.httpErrors.map((r) => r.error.name)).toEqual(['RangeError']);
   });
 });

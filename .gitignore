@@ -10,6 +10,9 @@ accounts.yaml
 .env.*
 !.env.example
 
+# SQLite store (MAILMCP_DATA_DIR default)
+data/
+
 # subagent-driven-development workspace
 .superpowers/
 
