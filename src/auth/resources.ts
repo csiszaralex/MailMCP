@@ -6,6 +6,10 @@ export const SUPPORTED_SCOPES = ['offline_access'] as const;
 /** The MCP endpoint that reaches every account. */
 const AGGREGATE_PATH = '/mcp';
 
+/** The OAuth endpoints, as the metadata names them and the routes serve them. */
+export const AUTHORIZE_PATH = '/authorize';
+export const TOKEN_PATH = '/token';
+
 /**
  * Every MCP endpoint path and its resource identifier (D33). The identifier is built from the
  * configured public origin, never from a request URL.
@@ -20,8 +24,8 @@ export function authorizationServerMetadata(publicUrl: URL): OAuthMetadata {
   const origin = publicUrl.origin;
   return {
     issuer: origin,
-    authorization_endpoint: `${origin}/authorize`,
-    token_endpoint: `${origin}/token`,
+    authorization_endpoint: `${origin}${AUTHORIZE_PATH}`,
+    token_endpoint: `${origin}${TOKEN_PATH}`,
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],

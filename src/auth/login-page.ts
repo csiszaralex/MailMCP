@@ -1,3 +1,5 @@
+import { AUTHORIZE_PATH } from './resources.js';
+
 /** What the login page shows about the pending authorization request (D31). */
 export interface LoginView {
   /** Host of the client_id URL, not the document's self-declared client_name. */
@@ -96,7 +98,7 @@ export function renderLoginPage(requestId: string, view: LoginView): string {
 <p>After sign-in you return to ${escapeHtml(view.redirectHost)}.</p>
 ${warning}
 ${error}
-<form method="post" action="/authorize">
+<form method="post" action="${AUTHORIZE_PATH}">
 <input type="hidden" name="request" value="${escapeHtml(requestId)}">
 <label>Password
 <input name="password" type="password" autocomplete="current-password" required>

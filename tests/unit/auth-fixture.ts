@@ -7,6 +7,7 @@ import { resourceUrls } from '../../src/auth/resources.js';
 import { TokenService } from '../../src/auth/tokens.js';
 import type { Account } from '../../src/config/types.js';
 import { createApp } from '../../src/http/app.js';
+import type { HttpErrorRecord } from '../../src/log.js';
 import type { MailProvider } from '../../src/mail/types.js';
 import type { ToolDeps } from '../../src/server.js';
 import { Store } from '../../src/store/store.js';
@@ -51,6 +52,7 @@ const deps: ToolDeps = {
 
 export interface TestApp {
   app: Hono;
+  flow: AuthorizationFlow;
   tokens: TokenService;
   store: Store;
   /** The injected clock's current time in milliseconds. */
@@ -58,6 +60,8 @@ export interface TestApp {
   advance: (ms: number) => void;
   /** Sends a request to the app with the Host header a real client would send. */
   fetch: typeof fetch;
+  /** What the app logged about errors no route handled. */
+  httpErrors: HttpErrorRecord[];
 }
 
 /**
@@ -68,6 +72,7 @@ export function createTestApp(publicUrl: URL = PUBLIC_URL): TestApp {
   let current = Date.now();
   const clock = (): number => current;
   const log = (): void => undefined;
+  const httpErrors: HttpErrorRecord[] = [];
   const store = Store.open(':memory:');
   const fetchCimd: typeof fetch = (input) =>
     Promise.resolve(
@@ -98,9 +103,13 @@ export function createTestApp(publicUrl: URL = PUBLIC_URL): TestApp {
   const app = createApp(ACCOUNTS, deps, {
     publicUrl,
     oauth: { flow, tokens, behindProxy: false, remoteAddress: () => CLIENT_IP },
+    logError: (record) => {
+      httpErrors.push(record);
+    },
   });
   return {
     app,
+    flow,
     tokens,
     store,
     now: clock,
@@ -112,6 +121,7 @@ export function createTestApp(publicUrl: URL = PUBLIC_URL): TestApp {
       request.headers.set('host', publicUrl.host);
       return Promise.resolve(app.fetch(request));
     },
+    httpErrors,
   };
 }
 

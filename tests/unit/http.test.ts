@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { ACCESS_TOKEN_TTL_MS } from '../../src/auth/tokens.js';
 import { MAX_REQUEST_BODY_BYTES } from '../../src/http/app.js';
@@ -263,5 +263,46 @@ describe('request body limit', () => {
       'content-length': String(MAX_REQUEST_BODY_BYTES + 1),
     });
     expect(response.status).toBe(413);
+  });
+});
+
+describe('unhandled errors', () => {
+  const secret = 'secret value 42';
+
+  it('answers a generic 500 and logs only the error class', async () => {
+    const test = setup();
+    vi.spyOn(test.flow, 'start').mockRejectedValue(new TypeError(secret));
+    const response = await test.fetch(`${ORIGIN}/authorize?client_id=x`);
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).toBe('Internal error');
+    expect(test.httpErrors).toEqual([
+      {
+        event: 'http_error',
+        error: { name: 'TypeError', code: null, responseStatus: null, serverResponseCode: null },
+      },
+    ]);
+    expect(JSON.stringify(test.httpErrors)).not.toContain(secret);
+  });
+
+  it('answers server_error as no-store JSON on /token', async () => {
+    const test = setup();
+    vi.spyOn(test.tokens, 'refresh').mockImplementation(() => {
+      throw new RangeError(secret);
+    });
+    const response = await test.fetch(`${ORIGIN}/token`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: 'r',
+        client_id: CLAUDE_CODE_ID,
+      }),
+    });
+    expect(response.status).toBe(500);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(text).not.toContain(secret);
+    expect(JSON.parse(text)).toMatchObject({ error: 'server_error' });
+    expect(test.httpErrors.map((r) => r.error.name)).toEqual(['RangeError']);
   });
 });

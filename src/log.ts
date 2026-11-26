@@ -73,11 +73,22 @@ export interface AuthEventRecord {
 
 export type AuthLogger = (record: AuthEventRecord) => void;
 
+/** An error no route handled; the HTTP answer is a generic 500. Never the message or stack. */
+export interface HttpErrorRecord {
+  event: 'http_error';
+  error: ErrorClass;
+}
+
+export type HttpErrorLogger = (record: HttpErrorRecord) => void;
+
 /** One JSON line per record. Never put mail content, passwords or tokens in a record. */
-function writeLine(record: LogRecord | ConnectionErrorRecord | AuthEventRecord): void {
+function writeLine(
+  record: LogRecord | ConnectionErrorRecord | AuthEventRecord | HttpErrorRecord,
+): void {
   process.stderr.write(`${JSON.stringify({ time: new Date().toISOString(), ...record })}\n`);
 }
 
 export const stderrLogger: Logger = writeLine;
 export const stderrConnectionLogger: ConnectionLogger = writeLine;
 export const stderrAuthLogger: AuthLogger = writeLine;
+export const stderrHttpErrorLogger: HttpErrorLogger = writeLine;

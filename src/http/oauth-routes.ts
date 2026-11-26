@@ -14,7 +14,12 @@ import {
   renderErrorPage,
   renderLoginPage,
 } from '../auth/login-page.js';
-import { authorizationServerMetadata, SUPPORTED_SCOPES } from '../auth/resources.js';
+import {
+  AUTHORIZE_PATH,
+  authorizationServerMetadata,
+  SUPPORTED_SCOPES,
+  TOKEN_PATH,
+} from '../auth/resources.js';
 import { TokenGrantError, type TokenService } from '../auth/tokens.js';
 import { clientIp } from './client-ip.js';
 
@@ -63,6 +68,7 @@ const TOO_LARGE = 'The request is too large.';
 const NOT_A_FORM = 'The sign-in form must be sent as application/x-www-form-urlencoded.';
 const FOREIGN_ORIGIN = "The sign-in form must be sent from this server's own page.";
 const BLOCKED = 'Too many failed sign-ins. Try again later.';
+const REPEATED = 'A request parameter is repeated.';
 
 type Fields = Readonly<Record<string, string>>;
 
@@ -76,23 +82,23 @@ function pick<K extends string>(fields: Fields, keys: readonly K[]): Partial<Rec
   return out;
 }
 
-/** The first value of every query parameter. */
-function queryFields(c: Context): Fields {
-  const out: Record<string, string> = {};
-  for (const [name, value] of new URL(c.req.url).searchParams) {
-    out[name] ??= value;
+/**
+ * Every parameter once, or undefined when one is repeated: RFC 6749 3.1 and 3.2 forbid a repeated
+ * parameter, and which copy counts would otherwise depend on the parser.
+ */
+function uniqueFields(params: URLSearchParams): Fields | undefined {
+  const seen = new Map<string, string>();
+  for (const [name, value] of params) {
+    if (seen.has(name)) return undefined;
+    seen.set(name, value);
   }
-  return out;
+  // fromEntries defines own properties, so a field named __proto__ stays a plain field.
+  return Object.fromEntries(seen);
 }
 
-/** The string fields of a form body; a file field counts as missing. */
-async function formFields(c: Context): Promise<Fields> {
-  const body = await c.req.parseBody();
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(body)) {
-    if (typeof value === 'string') out[name] = value;
-  }
-  return out;
+/** The form body's fields, parsed from the raw text so a repeated field is seen. */
+async function formFields(c: Context): Promise<Fields | undefined> {
+  return uniqueFields(new URLSearchParams(await c.req.text()));
 }
 
 function isForm(c: Context): boolean {
@@ -107,8 +113,12 @@ function errorPage(message: string, status: number, extra: Fields = {}): Respons
   return html(renderErrorPage(message), status, { ...PAGE_HEADERS, ...extra });
 }
 
+/** The Location carries a code or an error for the client: no cache may keep it. */
 function redirect(location: string): Response {
-  return new Response(null, { status: 302, headers: { Location: location } });
+  return new Response(null, {
+    status: 302,
+    headers: { Location: location, 'Cache-Control': 'no-store' },
+  });
 }
 
 function pageFor(result: StartResult | CompleteResult): Response {
@@ -135,7 +145,7 @@ function tokenJson(body: object, status: number): Response {
   });
 }
 
-function tokenError(error: string, description: string, status = 400): Response {
+export function tokenError(error: string, description: string, status = 400): Response {
   return tokenJson({ error, error_description: description }, status);
 }
 
@@ -182,13 +192,17 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
   const ipOf = (c: Context): string =>
     clientIp(c.req.header('x-forwarded-for'), deps.remoteAddress(c), deps.behindProxy);
 
-  app.get('/authorize', async (c) => {
-    const params: AuthorizeParams = pick(queryFields(c), AUTHORIZE_KEYS);
+  app.get(AUTHORIZE_PATH, async (c) => {
+    // Before anything else and always as a page: with a repeated client_id or redirect_uri no
+    // redirect target is verified (D31).
+    const query = uniqueFields(new URL(c.req.url).searchParams);
+    if (query === undefined) return errorPage(REPEATED, 400);
+    const params: AuthorizeParams = pick(query, AUTHORIZE_KEYS);
     return pageFor(await deps.flow.start(params, ipOf(c)));
   });
 
   app.post(
-    '/authorize',
+    AUTHORIZE_PATH,
     bodyLimit({ maxSize: MAX_FORM_BYTES, onError: () => errorPage(TOO_LARGE, 413) }),
     async (c) => {
       // The sealed request (only this server can make one) and this check together stand in for
@@ -196,6 +210,7 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
       if (c.req.header('origin') !== deps.publicUrl.origin) return errorPage(FOREIGN_ORIGIN, 403);
       if (!isForm(c)) return errorPage(NOT_A_FORM, 400);
       const form = await formFields(c);
+      if (form === undefined) return errorPage(REPEATED, 400);
       return pageFor(
         deps.flow.complete({
           requestId: form.request ?? '',
@@ -206,10 +221,10 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
       );
     },
   );
-  app.all('/authorize', () => methodNotAllowed('GET, HEAD, POST'));
+  app.all(AUTHORIZE_PATH, () => methodNotAllowed('GET, HEAD, POST'));
 
   app.post(
-    '/token',
+    TOKEN_PATH,
     bodyLimit({
       maxSize: MAX_FORM_BYTES,
       onError: () => tokenError('invalid_request', 'The request body is too large.', 413),
@@ -219,6 +234,10 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
         return tokenError('invalid_request', `The body must be ${FORM_TYPE}.`);
       }
       const form = await formFields(c);
+      if (form === undefined) return tokenError('invalid_request', REPEATED);
+      if (form.grant_type === undefined || form.grant_type === '') {
+        return tokenError('invalid_request', 'grant_type is required.');
+      }
       const ip = ipOf(c);
       try {
         if (form.grant_type === 'authorization_code') {
@@ -241,5 +260,5 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
       }
     },
   );
-  app.all('/token', () => methodNotAllowed('POST'));
+  app.all(TOKEN_PATH, () => methodNotAllowed('POST'));
 }

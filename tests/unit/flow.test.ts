@@ -587,7 +587,7 @@ describe('AuthorizationFlow redeem', () => {
     expect(s.flow.redeem(redeemParams(some), IP).scope).toBe('offline_access');
     s.advance(STEP_MS);
     const none = await codeFor(s, { scope: undefined });
-    expect(s.flow.redeem(redeemParams(none), IP).scope).toBe('');
+    expect(s.flow.redeem(redeemParams(none), IP)).not.toHaveProperty('scope');
   });
 
   it('accepts a matching resource, also with a trailing slash', async () => {

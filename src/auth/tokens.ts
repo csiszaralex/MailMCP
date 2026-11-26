@@ -26,7 +26,8 @@ export interface TokenResponse {
   token_type: 'Bearer';
   expires_in: number;
   refresh_token: string;
-  scope: string;
+  /** Left out when the grant has no scope: RFC 6749 3.3 has no empty scope value. */
+  scope?: string;
 }
 
 /** A /token failure; the message is safe to send as error_description. */
@@ -139,7 +140,7 @@ export class TokenService implements OAuthTokenVerifier {
       token_type: 'Bearer',
       expires_in: ACCESS_TOKEN_TTL_MS / 1000,
       refresh_token: refreshToken,
-      scope: grant.scope,
+      ...(grant.scope === '' ? {} : { scope: grant.scope }),
     };
   }
 

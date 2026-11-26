@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   createMcpHandler,
   getOAuthProtectedResourceMetadataUrl,
@@ -6,14 +7,16 @@ import {
   originValidationResponse,
   requireBearerAuth,
 } from '@modelcontextprotocol/server';
-import { resourceUrls } from '../auth/resources.js';
+import { resourceUrls, TOKEN_PATH } from '../auth/resources.js';
 import type { Account } from '../config/types.js';
+import { errorClass, type HttpErrorLogger } from '../log.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
 import { buildMcpServer, type ToolDeps } from '../server.js';
 import {
   AUTHORIZATION_SERVER_METADATA_PATH,
   PROTECTED_RESOURCE_METADATA_PREFIX,
   registerOAuthRoutes,
+  tokenError,
   type OAuthRouteDeps,
 } from './oauth-routes.js';
 
@@ -28,6 +31,8 @@ export interface AppOptions {
   /** MAILMCP_PUBLIC_URL: the only accepted Host and Origin, and the base of every resource. */
   publicUrl: URL;
   oauth: Omit<OAuthRouteDeps, 'publicUrl' | 'resources'>;
+  /** Gets the class of every error no route handled. */
+  logError: HttpErrorLogger;
 }
 
 type McpHandler = ReturnType<typeof createMcpHandler>;
@@ -125,5 +130,15 @@ export function createApp(accounts: readonly Account[], deps: ToolDeps, options:
     return serve === undefined ? c.notFound() : serve(c.req.raw);
   });
   app.notFound((c) => c.text('Not found', 404));
+  // The answer and the log say nothing of the error but its class: the message or the stack
+  // may carry a request value.
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
+    options.logError({ event: 'http_error', error: errorClass(err) });
+    if (c.req.path === TOKEN_PATH) {
+      return tokenError('server_error', 'The server could not handle the request.', 500);
+    }
+    return c.text('Internal error', 500);
+  });
   return app;
 }

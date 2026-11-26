@@ -261,10 +261,24 @@ describe('GET /authorize', () => {
     expect(location.searchParams.get('iss')).toBe(ORIGIN);
   });
 
-  it('takes the first value of a repeated parameter', async () => {
-    const url = `${authorizeUrl()}&resource=${encodeURIComponent('http://127.0.0.1:8787/mcp/b')}`;
-    const res = await setup().request(url);
-    expect(res.status).toBe(200);
+  it('shows an error page, never a redirect, for any repeated parameter', async () => {
+    const app = setup();
+    for (const extra of [
+      `resource=${encodeURIComponent('http://127.0.0.1:8787/mcp/b')}`,
+      `redirect_uri=${encodeURIComponent('https://evil.example/cb')}`,
+      'state=again',
+    ]) {
+      const res = await app.request(`${authorizeUrl()}&${extra}`);
+      expect(res.status).toBe(400);
+      expect(res.headers.get('location')).toBeNull();
+      expect(await res.text()).toContain('A request parameter is repeated.');
+    }
+  });
+
+  it('answers every redirect with Cache-Control no-store', async () => {
+    const res = await setup().request(authorizeUrl({ response_type: 'token' }));
+    expect(res.status).toBe(302);
+    expect(res.headers.get('cache-control')).toBe('no-store');
   });
 });
 
@@ -302,6 +316,7 @@ describe('POST /authorize', () => {
     const request = await startLogin(app);
     const res = await postAuthorize(app, { request, password: PASSWORD, totp: rightCode() });
     expect(res.status).toBe(302);
+    expect(res.headers.get('cache-control')).toBe('no-store');
     const location = new URL(res.headers.get('location') ?? '');
     expect(`${location.origin}${location.pathname}`).toBe(REDIRECT);
     expect(location.searchParams.get('code')).not.toBeNull();
@@ -320,6 +335,21 @@ describe('POST /authorize', () => {
     const html = await res.text();
     expect(html).toContain('Invalid password or code.');
     expect(html).not.toContain('wrong');
+  });
+
+  it('shows an error page for a repeated form field', async () => {
+    const app = setup();
+    const request = await startLogin(app);
+    const body = new URLSearchParams({ request, password: 'wrong', totp: rightCode() });
+    body.append('password', PASSWORD);
+    const res = await app.request('/authorize', {
+      method: 'POST',
+      headers: { Origin: ORIGIN },
+      body,
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers.get('location')).toBeNull();
+    expect(await res.text()).toContain('A request parameter is repeated.');
   });
 
   it('shows an error page for an unknown request', async () => {
@@ -363,6 +393,45 @@ describe('POST /token', () => {
     expect(res.status).toBe(413);
     expectNoStore(res);
     expect(await json(res)).toMatchObject({ error: 'invalid_request' });
+  });
+
+  it('refuses a missing or empty grant_type with invalid_request', async () => {
+    const app = setup();
+    for (const fields of [{ code: 'x' }, { grant_type: '' }]) {
+      const res = await postToken(app, fields);
+      expect(res.status).toBe(400);
+      expectNoStore(res);
+      expect(await json(res)).toMatchObject({ error: 'invalid_request' });
+    }
+  });
+
+  it('refuses a repeated field with invalid_request and does not spend the code', async () => {
+    const app = setup();
+    const code = await codeFor(app);
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: CLAUDE_CODE_ID,
+      redirect_uri: REDIRECT,
+      code_verifier: VERIFIER,
+    });
+    body.append('code_verifier', VERIFIER);
+    const res = await app.request('/token', { method: 'POST', body });
+    expect(res.status).toBe(400);
+    expectNoStore(res);
+    expect(await json(res)).toMatchObject({ error: 'invalid_request' });
+    expect((await redeem(app, code)).status).toBe(200);
+  });
+
+  it('leaves scope out of the token response when the grant has none', async () => {
+    const app = setup();
+    const res = await app.request(authorizeUrl({ scope: undefined }));
+    const request = /name="request" value="([^"]+)"/.exec(await res.text())?.[1] ?? '';
+    const done = await postAuthorize(app, { request, password: PASSWORD, totp: rightCode() });
+    const code = new URL(done.headers.get('location') ?? '').searchParams.get('code') ?? '';
+    const body = await json(await redeem(app, code));
+    expect(body).not.toHaveProperty('scope');
+    expect(TokenBody.safeParse(body).success).toBe(true);
   });
 
   it('refuses an unknown grant_type with unsupported_grant_type', async () => {

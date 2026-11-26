@@ -13,7 +13,7 @@ import { MailError } from './errors.js';
 import { createApp } from './http/app.js';
 import { tlsConnector } from './imap/client.js';
 import { ImapPool } from './imap/pool.js';
-import { errorClass, stderrAuthLogger, stderrLogger } from './log.js';
+import { errorClass, stderrAuthLogger, stderrHttpErrorLogger, stderrLogger } from './log.js';
 import { ImapMailProvider } from './mail/imap-provider.js';
 import { ImapMailWriter } from './mail/imap-writer.js';
 import type { ToolDeps } from './server.js';
@@ -87,6 +87,7 @@ const app = createApp(config.accounts, deps, {
     behindProxy: runtime.behindProxy,
     remoteAddress: (c) => getConnInfo(c).remote.address,
   },
+  logError: stderrHttpErrorLogger,
 });
 
 const pruneTimer = setInterval(() => {
