@@ -22,6 +22,8 @@ https://mailmcp.example.com/mcp
 
 Az első használatkor a szerver bejelentkező oldala nyílik meg (jelszó és TOTP).
 
+Soha ne lépj be olyan bejelentkező oldalon, amelyet nem te nyitottál meg a Claude-ból: egy idegen link a saját programjának kérhet így hozzáférést.
+
 ### Claude Code, egy mappához egy fiók
 
 A mappa gyökerében egy `.mcp.json`:

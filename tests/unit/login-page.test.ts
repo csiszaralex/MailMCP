@@ -45,8 +45,13 @@ describe('renderLoginPage', () => {
     expect(html).toContain('value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"');
   });
 
-  it('warns about a loopback redirect only when it is one', () => {
-    expect(renderLoginPage('req-1', VIEW)).not.toContain(LOOPBACK_WARNING);
+  it('warns on every page and names the redirect host or the local program', () => {
+    const remote = renderLoginPage('req-1', { ...VIEW, redirectHost: 'callback.example' });
+    expect(remote).not.toContain(LOOPBACK_WARNING);
+    expect(renderLoginPage('req-1', { ...VIEW, redirectHost: '<b>x</b>' })).not.toContain('<b>');
+    expect(remote).toContain(
+      '<p class="warning">The answer goes to callback.example. Continue only if you started the sign-in yourself.</p>',
+    );
     const html = renderLoginPage('req-1', {
       ...VIEW,
       redirectHost: '127.0.0.1:53124',
@@ -68,6 +73,10 @@ describe('renderLoginPage', () => {
     const html = renderLoginPage('req-1', VIEW);
     expect(html).toContain('<form method="post" action="/authorize">');
     expect(html).toContain('<input type="hidden" name="request" value="req-1">');
+    // A password manager files the password under this name.
+    expect(html).toContain(
+      '<input type="text" name="username" value="admin" autocomplete="username" hidden>',
+    );
     expect(html).toMatch(
       /<input[^>]*name="password" type="password" autocomplete="current-password" required>/,
     );

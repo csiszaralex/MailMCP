@@ -86,10 +86,18 @@ ${body}
 `;
 }
 
+/**
+ * There is one login and no user name; the hidden field only lets a password manager file the
+ * password under a name. The server ignores it.
+ */
+const LOGIN_USERNAME = 'admin';
+
 export function renderLoginPage(requestId: string, view: LoginView): string {
-  const warning = view.loopbackRedirect
-    ? `<p class="warning">The answer goes to a program on this computer (${escapeHtml(view.redirectHost)}). Continue only if you started the sign-in yourself.</p>`
-    : '';
+  // Anyone can send the owner a link to this page with a client_id and redirect_uri of their own.
+  const destination = view.loopbackRedirect
+    ? `a program on this computer (${escapeHtml(view.redirectHost)})`
+    : escapeHtml(view.redirectHost);
+  const warning = `<p class="warning">The answer goes to ${destination}. Continue only if you started the sign-in yourself.</p>`;
   const error = view.error === undefined ? '' : `<p class="error">${escapeHtml(view.error)}</p>`;
   return page(
     'Sign in to MailMCP',
@@ -100,6 +108,7 @@ ${warning}
 ${error}
 <form method="post" action="${AUTHORIZE_PATH}">
 <input type="hidden" name="request" value="${escapeHtml(requestId)}">
+<input type="text" name="username" value="${LOGIN_USERNAME}" autocomplete="username" hidden>
 <label>Password
 <input name="password" type="password" autocomplete="current-password" required>
 </label>
