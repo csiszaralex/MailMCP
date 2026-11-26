@@ -232,7 +232,7 @@ describe('write tool calls', () => {
     for (const args of [{}, { messageId: idOf('b'), threadId: thread }]) {
       const res = await call('untrash', args);
       expect(res.isError).toBe(true);
-      expect(textOf(res)).toBe('invalid_id: Give exactly one of messageId or threadId.');
+      expect(textOf(res)).toBe('invalid_argument: Give exactly one of messageId or threadId.');
     }
     expect(writerCalls).toEqual([]);
   });

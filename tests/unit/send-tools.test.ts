@@ -244,7 +244,7 @@ describe('send', () => {
     const mixed = await call('send', { draftId: draft, subject: 'other' });
     expect(mixed.isError).toBe(true);
     expect(textOf(mixed)).toBe(
-      'invalid_id: With draftId the draft is sent as it is; leave the other fields out.',
+      'invalid_argument: With draftId the draft is sent as it is; leave the other fields out.',
     );
     expect(writerCalls).toEqual([]);
     const res = await call('send', { draftId: draft });

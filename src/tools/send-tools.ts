@@ -85,7 +85,7 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
             args.includeSignature;
           if (hasContent) {
             throw new MailError(
-              'invalid_id',
+              'invalid_argument',
               'With draftId the draft is sent as it is; leave the other fields out.',
             );
           }

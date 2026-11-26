@@ -53,7 +53,7 @@ function writeTarget(args: TargetArgs): WriteTarget {
   if (threadId !== undefined && messageId === undefined) {
     return { kind: 'thread', ref: decodeThreadId(threadId) };
   }
-  throw new MailError('invalid_id', 'Give exactly one of messageId or threadId.');
+  throw new MailError('invalid_argument', 'Give exactly one of messageId or threadId.');
 }
 
 /** Log label of a messageId/threadId pair; nothing unless exactly one is given. */

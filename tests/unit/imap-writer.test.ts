@@ -316,7 +316,7 @@ describe('ImapMailWriter.updateDraft', () => {
   it('refuses to drop attachments the update does not mention', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'], source: STORED_WITH_FILES });
     await expect(writer(fake).updateDraft(REF, { subject: 'New' })).rejects.toMatchObject({
-      code: 'invalid_id',
+      code: 'invalid_argument',
       message:
         'This draft has 2 attachments; pass attachments: [] to drop them, or give them again.',
     });

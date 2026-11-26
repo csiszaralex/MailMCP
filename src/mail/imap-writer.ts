@@ -80,7 +80,7 @@ const RESTORE_SOURCES = {
 function keptAttachmentsRefusal(count: number): MailError {
   const what = count === 1 ? '1 attachment' : `${String(count)} attachments`;
   return new MailError(
-    'invalid_id',
+    'invalid_argument',
     `This draft has ${what}; pass attachments: [] to drop them, or give them again.`,
   );
 }

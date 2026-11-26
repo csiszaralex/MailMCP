@@ -2,6 +2,8 @@ export type MailErrorCode =
   | 'config_invalid'
   | 'unknown_account'
   | 'invalid_id'
+  /** The call's arguments do not fit together or are missing; the ids themselves may be fine. */
+  | 'invalid_argument'
   | 'stale_id'
   | 'not_found'
   | 'mailbox_not_found'

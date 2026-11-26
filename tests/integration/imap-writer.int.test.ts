@@ -241,7 +241,7 @@ describe('updateDraft', () => {
     );
     const ref = decodeMessageId(first.draftId);
     await expect(writer.updateDraft(ref, { subject: 'Offer v2' })).rejects.toMatchObject({
-      code: 'invalid_id',
+      code: 'invalid_argument',
       message:
         'This draft has 1 attachment; pass attachments: [] to drop them, or give them again.',
     });
