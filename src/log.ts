@@ -62,7 +62,7 @@ export interface AuthEventRecord {
     | 'token_refreshed'
     | 'refresh_reuse'
     | 'code_reuse';
-  /** Host of the client_id URL. */
+  /** The client_id URL (D47). */
   client: string | null;
   resource: string | null;
   /** The client address as clientIp gives it (D34); 'unknown' when there is none. */

@@ -153,7 +153,7 @@ export class TokenService implements OAuthTokenVerifier {
   private event(event: AuthEventRecord['event'], grant: GrantRow, ip: string): void {
     this.log({
       event,
-      client: clientHost(grant.clientId),
+      client: grant.clientId,
       resource: grant.resource,
       ip,
       reason: null,

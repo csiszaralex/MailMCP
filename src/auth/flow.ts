@@ -15,13 +15,7 @@ import type { LoginLimiter } from './limiter.js';
 import type { LoginView } from './login-page.js';
 import { verifyPassword, type PasswordHash } from './password.js';
 import { normalizeResource, SUPPORTED_SCOPES } from './resources.js';
-import {
-  clientHost,
-  type Clock,
-  TokenGrantError,
-  type TokenResponse,
-  type TokenService,
-} from './tokens.js';
+import { type Clock, TokenGrantError, type TokenResponse, type TokenService } from './tokens.js';
 import { matchTotp } from './totp.js';
 
 /** D31: a pending authorization request lives 10 minutes. */
@@ -439,7 +433,8 @@ export class AuthorizationFlow {
   private rejected(clientId: string | null, ip: string, reason: string): void {
     this.deps.log({
       event: 'authorize_rejected',
-      client: clientId === null ? null : clientHost(clientId),
+      // Only a parseable URL: the rejected value comes straight from the request.
+      client: clientId !== null && URL.canParse(clientId) ? clientId : null,
       resource: null,
       ip,
       reason,
@@ -454,7 +449,7 @@ export class AuthorizationFlow {
   ): void {
     this.deps.log({
       event,
-      client: clientHost(binding.clientId),
+      client: binding.clientId,
       resource: binding.resource,
       ip,
       reason,
