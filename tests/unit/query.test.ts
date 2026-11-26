@@ -67,6 +67,12 @@ describe('translateQuery', () => {
     });
   });
 
+  it('treats object prototype names after in: as folder paths', () => {
+    for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(translateQuery(`in:${name}`).mailbox, name).toEqual({ kind: 'path', path: name });
+    }
+  });
+
   it('treats unknown word: tokens and URLs as free text', () => {
     expect(translateQuery('re:hello https://example.org/a').criteria).toEqual({
       text: 're:hello https://example.org/a',

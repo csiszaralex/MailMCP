@@ -1,7 +1,7 @@
 import type { SearchObject } from 'imapflow';
 import { MailError } from '../errors.js';
 
-export type SpecialUse = '\\All' | '\\Drafts' | '\\Sent' | '\\Trash' | '\\Junk';
+export type SpecialUse = '\\All' | '\\Drafts' | '\\Sent' | '\\Trash' | '\\Junk' | '\\Archive';
 
 export type MailboxSelector =
   { kind: 'inbox' } | { kind: 'special'; use: SpecialUse } | { kind: 'path'; path: string };
@@ -13,18 +13,19 @@ export interface ImapQuery {
 
 const GMAIL_ONLY = 'is only supported on Gmail accounts';
 
-const IN_ALIASES: Record<string, MailboxSelector> = {
-  inbox: { kind: 'inbox' },
-  sent: { kind: 'special', use: '\\Sent' },
-  drafts: { kind: 'special', use: '\\Drafts' },
-  draft: { kind: 'special', use: '\\Drafts' },
-  trash: { kind: 'special', use: '\\Trash' },
-  bin: { kind: 'special', use: '\\Trash' },
-  spam: { kind: 'special', use: '\\Junk' },
-  junk: { kind: 'special', use: '\\Junk' },
-  all: { kind: 'special', use: '\\All' },
-  anywhere: { kind: 'special', use: '\\All' },
-};
+/** The in: names of the inbox and the special-use mailboxes, lowercase. A Map, so "constructor" is no alias. */
+const IN_ALIASES = new Map<string, MailboxSelector>([
+  ['inbox', { kind: 'inbox' }],
+  ['sent', { kind: 'special', use: '\\Sent' }],
+  ['drafts', { kind: 'special', use: '\\Drafts' }],
+  ['draft', { kind: 'special', use: '\\Drafts' }],
+  ['trash', { kind: 'special', use: '\\Trash' }],
+  ['bin', { kind: 'special', use: '\\Trash' }],
+  ['spam', { kind: 'special', use: '\\Junk' }],
+  ['junk', { kind: 'special', use: '\\Junk' }],
+  ['all', { kind: 'special', use: '\\All' }],
+  ['anywhere', { kind: 'special', use: '\\All' }],
+]);
 
 /**
  * Gmail operators that plain IMAP cannot express: they fail loudly. Any other "word:" token
@@ -67,6 +68,46 @@ function unsupported(message: string): MailError {
 /** Splits on whitespace but keeps "quoted phrases" (also after an operator) together. */
 function tokenize(query: string): string[] {
   return query.match(/[^\s"]*"[^"]*"|\S+/g) ?? [];
+}
+
+/** The Gmail mailboxes that All Mail leaves out. */
+const GMAIL_EXCLUDED = new Set<SpecialUse>(['\\Trash', '\\Junk']);
+
+/** The mailbox All Mail leaves out that an in: token (any case, an IN_ALIASES name) selects. */
+function gmailExcluded(token: string): SpecialUse | undefined {
+  const lower = token.toLowerCase();
+  if (!lower.startsWith('in:')) return undefined;
+  const selector = IN_ALIASES.get(lower.slice('in:'.length));
+  return selector?.kind === 'special' && GMAIL_EXCLUDED.has(selector.use)
+    ? selector.use
+    : undefined;
+}
+
+export interface GmailSearch {
+  mailbox: SpecialUse;
+  /** The X-GM-RAW text; blank for every message of the mailbox. */
+  gmraw: string;
+}
+
+/**
+ * Gmail searches All Mail, which holds neither the trash nor spam. An in: token naming the trash
+ * or spam (in:trash, in:bin, in:spam, in:junk, any case) selects that mailbox instead and is taken
+ * out of the X-GM-RAW text.
+ */
+export function gmailSearch(query: string): GmailSearch {
+  const tokens = tokenize(query);
+  const kept = tokens.filter((token) => gmailExcluded(token) === undefined);
+  const selected = new Set(
+    tokens.flatMap((token) => {
+      const use = gmailExcluded(token);
+      return use === undefined ? [] : [use];
+    }),
+  );
+  const [only, ...more] = selected;
+  if (only === undefined) return { mailbox: '\\All', gmraw: query };
+  if (more.length > 0)
+    throw unsupported('in:trash and in:spam cannot be combined; search one, then the other');
+  return { mailbox: only, gmraw: kept.join(' ') };
 }
 
 function unquote(value: string): string {
@@ -148,7 +189,7 @@ export function translateQuery(query: string): ImapQuery {
         break;
       case 'in':
         once('in');
-        mailbox = IN_ALIASES[value.toLowerCase()] ?? { kind: 'path', path: value };
+        mailbox = IN_ALIASES.get(value.toLowerCase()) ?? { kind: 'path', path: value };
         break;
       default:
         throw unsupported(`${name}: ${GMAIL_ONLY}`);

@@ -1,44 +1,66 @@
 import { ImapFlow } from 'imapflow';
+import { createTransport } from 'nodemailer';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-import type { Account } from '../../src/config/types.js';
+import type { Account, MailboxOverrides } from '../../src/config/types.js';
 import type { ImapClientFactory } from '../../src/imap/client.js';
+import type { SmtpSend } from '../../src/smtp/sender.js';
 
 export const GREENMAIL_IMAGE = 'greenmail/standalone:2.1.15';
 const IMAP_PORT = 3143;
+const SMTP_PORT = 3025;
+const PASSWORD = 'secret';
 
 export interface GreenMail {
   container: StartedTestContainer;
+  /** alice@example.com */
   account: Account;
+  /** bob@example.com, on the same server. */
+  bob: Account;
+  smtpPort: number;
+  /** Plaintext SMTP with the sending account's password: only tests may send without TLS. */
+  send: SmtpSend;
   /** Plaintext factory with the right password: only tests may connect without TLS. */
   connect: ImapClientFactory;
   /** The same factory with any password, to test rejected logins. */
   connectAs: (password: string) => ImapClientFactory;
 }
 
+function testAccount(
+  id: string,
+  user: string,
+  host: string,
+  imapPort: number,
+  smtpPort: number,
+): Account {
+  return {
+    id,
+    owner: 'alex',
+    address: `${user}@example.com`,
+    username: user,
+    provider: 'imap',
+    level: 'read',
+    signature: undefined,
+    imap: { host, port: imapPort },
+    smtp: { host, port: smtpPort },
+    mailboxes: {},
+  };
+}
+
 export async function startGreenMail(): Promise<GreenMail> {
   const container = await new GenericContainer(GREENMAIL_IMAGE)
     .withEnvironment({
       GREENMAIL_OPTS:
-        '-Dgreenmail.setup.test.imap -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=alice:secret@example.com',
+        '-Dgreenmail.setup.test.imap -Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=alice:secret@example.com,bob:secret@example.com',
     })
-    .withExposedPorts(IMAP_PORT)
+    .withExposedPorts(IMAP_PORT, SMTP_PORT)
     .withWaitStrategy(Wait.forListeningPorts())
     .start();
 
   const host = container.getHost();
   const port = container.getMappedPort(IMAP_PORT);
-  const account: Account = {
-    id: 'test',
-    owner: 'alex',
-    address: 'alice@example.com',
-    username: 'alice',
-    provider: 'imap',
-    level: 'read',
-    signature: undefined,
-    imap: { host, port },
-    smtp: { host, port: 3025 },
-    mailboxes: {},
-  };
+  const smtpPort = container.getMappedPort(SMTP_PORT);
+  const account = testAccount('test', 'alice', host, port, smtpPort);
+  const bob = testAccount('bob', 'bob', host, port, smtpPort);
   const connectAs =
     (password: string): ImapClientFactory =>
     async (acc) => {
@@ -54,8 +76,38 @@ export async function startGreenMail(): Promise<GreenMail> {
       await client.connect();
       return client;
     };
-  return { container, account, connect: connectAs('secret'), connectAs };
+  const send: SmtpSend = async (acc, raw, envelope) => {
+    const transport = createTransport({
+      host: acc.smtp.host,
+      port: acc.smtp.port,
+      secure: false,
+      ignoreTLS: true,
+      auth: { user: acc.username, pass: PASSWORD },
+    });
+    try {
+      const info = await transport.sendMail({
+        envelope: { from: envelope.from, to: envelope.to },
+        raw,
+      });
+      return { rejected: info.rejected };
+    } finally {
+      transport.close();
+    }
+  };
+  return { container, account, bob, smtpPort, send, connect: connectAs(PASSWORD), connectAs };
 }
+
+/**
+ * Mailbox overrides for writer tests. GreenMail sends no SPECIAL-USE flags, so the overrides keep
+ * the tests independent of imapflow guessing special use from folder names. seed() creates them.
+ */
+export const WRITE_MAILBOXES = {
+  drafts: 'Drafts',
+  sent: 'Sent',
+  trash: 'Trash',
+  junk: 'Junk',
+  archive: 'Archive',
+} satisfies MailboxOverrides;
 
 function mail(lines: string[]): Buffer {
   return Buffer.from(lines.join('\r\n'));
@@ -65,7 +117,10 @@ function mail(lines: string[]): Buffer {
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-/** Seeds INBOX with three messages (uid 1..3); Drafts, Newsletters and Forwards with one each. */
+/**
+ * Seeds INBOX with three messages (uid 1..3); Drafts, Newsletters and Forwards with one each.
+ * Every WRITE_MAILBOXES folder exists; Sent, Trash, Junk and Archive start empty.
+ */
 export async function seed(gm: GreenMail): Promise<void> {
   const client = new ImapFlow({
     host: gm.account.imap.host,
@@ -76,7 +131,7 @@ export async function seed(gm: GreenMail): Promise<void> {
     logger: false,
   });
   await client.connect();
-  await client.mailboxCreate('Drafts');
+  for (const path of Object.values(WRITE_MAILBOXES)) await client.mailboxCreate(path);
 
   await client.append(
     'INBOX',

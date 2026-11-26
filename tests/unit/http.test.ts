@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createApp } from '../../src/http/app.js';
+import { createApp, MAX_REQUEST_BODY_BYTES } from '../../src/http/app.js';
 import type { Account } from '../../src/config/types.js';
 import type { ToolDeps } from '../../src/server.js';
 import type { MailProvider } from '../../src/mail/types.js';
@@ -15,6 +15,9 @@ const ACCOUNTS = [
 const deps: ToolDeps = {
   providerFor: (id) =>
     ({ account: ACCOUNTS.find((a) => a.id === id) }) as Partial<MailProvider> as MailProvider,
+  writerFor: () => {
+    throw new Error('every account is read-only, so no write tool asks for a writer');
+  },
   log: () => undefined,
 };
 
@@ -84,5 +87,37 @@ describe('HTTP app', () => {
       body: '{}',
     });
     expect(response.status).toBe(403);
+  });
+});
+
+describe('request body limit', () => {
+  const headers = {
+    host: LOCAL_HOST,
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+  };
+  const post = (body: string, extra: Record<string, string> = {}) =>
+    app.request('http://127.0.0.1:8787/mcp', {
+      method: 'POST',
+      headers: { ...headers, ...extra },
+      body,
+    });
+
+  it('accepts a request above the SDK default of 4 MiB', async () => {
+    const padding = 'x'.repeat(5 * 1024 * 1024);
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: { padding },
+    });
+    expect((await post(body)).status).not.toBe(413);
+  });
+
+  it('answers 413 above MAX_REQUEST_BODY_BYTES', async () => {
+    const response = await post('{}', {
+      'content-length': String(MAX_REQUEST_BODY_BYTES + 1),
+    });
+    expect(response.status).toBe(413);
   });
 });

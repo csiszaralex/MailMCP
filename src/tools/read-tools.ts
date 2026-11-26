@@ -1,22 +1,24 @@
 import * as z from 'zod';
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { searchAccounts } from '../aggregate/search.js';
-import type { Account } from '../config/types.js';
-import { MailError } from '../errors.js';
 import { decodeCursor, decodeMessageId, decodeThreadId, encodeCursor } from '../ids.js';
 import type { Logger, LogTarget } from '../log.js';
 import { ATTACHMENT_LIMIT_BYTES, THREAD_MESSAGE_LIMIT } from '../mail/imap-provider.js';
 import type { MailProvider, MessageSummary } from '../mail/types.js';
-import { jsonResult, runTool, ToolFailure, UNTRUSTED_NOTE } from './result.js';
-
-export interface ToolScope {
-  accounts: readonly Account[];
-  /** Set on /mcp/<id>: the account parameter disappears and ids must belong to it. */
-  scopedAccountId: string | undefined;
-}
+import type { MailWriter } from '../mail/write-types.js';
+import { jsonResult, toolRunner, ToolFailure, UNTRUSTED_NOTE } from './result.js';
+import {
+  accountIdSchema,
+  messageTarget,
+  NO_TARGET,
+  scopeHelpers,
+  threadTarget,
+  type ToolScope,
+} from './scope.js';
 
 export interface ToolDeps {
   providerFor(accountId: string): MailProvider;
+  writerFor(accountId: string): MailWriter;
   log: Logger;
 }
 
@@ -28,12 +30,6 @@ const viewSchema = z.enum(['ids', 'metadata', 'minimal']).default('minimal');
 const formatSchema = z.enum(['metadata', 'plain', 'html', 'raw']).default('plain');
 type View = z.infer<typeof viewSchema>;
 
-function accountIdSchema(accounts: readonly Account[]) {
-  const [first, ...rest] = accounts.map((a) => a.id);
-  if (first === undefined) throw new Error('at least one account is required');
-  return z.enum([first, ...rest]).describe('Account id from list_accounts.');
-}
-
 function shape(message: MessageSummary, view: View): object {
   if (view === 'ids')
     return { id: message.id, threadId: message.threadId, account: message.account };
@@ -43,50 +39,11 @@ function shape(message: MessageSummary, view: View): object {
   return message;
 }
 
-const NO_TARGET: LogTarget = { account: null, id: null };
-
-/** Log label of a message id: its account and the opaque id; nothing for an invalid id. */
-function messageTarget(messageId: string): LogTarget {
-  try {
-    return { account: decodeMessageId(messageId).account, id: messageId };
-  } catch {
-    return NO_TARGET;
-  }
-}
-
-/** Log label of a thread id; a references thread id embeds a Message-ID header, so only its account. */
-function threadTarget(threadId: string): LogTarget {
-  try {
-    const ref = decodeThreadId(threadId);
-    return { account: ref.account, id: ref.kind === 'gmail' ? threadId : null };
-  } catch {
-    return NO_TARGET;
-  }
-}
-
 export function registerReadTools(server: McpServer, scope: ToolScope, deps: ToolDeps): void {
   const scoped = scope.scopedAccountId !== undefined;
-  const inScope = (accountId: string): Account => {
-    const found = scope.accounts.find((a) => a.id === accountId);
-    if (found === undefined) {
-      throw new MailError(
-        'unknown_account',
-        `Account "${accountId}" is not available on this endpoint.`,
-      );
-    }
-    return found;
-  };
+  const { inScope, requestedAccount, onlyAccount } = scopeHelpers(scope);
   const providerOf = (accountId: string): MailProvider => deps.providerFor(inScope(accountId).id);
-  /** The account a single-account call targets, or null if none was given; never throws, so it is safe as a log label. */
-  const requestedAccount = (requested: string | undefined): string | null =>
-    scope.scopedAccountId ?? requested ?? null;
-  const onlyAccount = (requested: string | undefined): string => {
-    const id = requestedAccount(requested);
-    if (id === null) throw new MailError('unknown_account', 'The account parameter is required.');
-    return id;
-  };
-  const run = (tool: string, target: LogTarget, fn: () => Promise<CallToolResult>) =>
-    runTool(deps.log, tool, target, fn);
+  const run = toolRunner(deps.log);
   const accountTarget = (requested: string | undefined): LogTarget => ({
     account: requestedAccount(requested),
     id: null,

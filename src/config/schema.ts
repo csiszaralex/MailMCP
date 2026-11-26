@@ -15,6 +15,7 @@ const mailboxOverridesSchema = z
     trash: z.string().min(1),
     junk: z.string().min(1),
     all: z.string().min(1),
+    archive: z.string().min(1),
   })
   .partial();
 

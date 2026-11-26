@@ -2,7 +2,7 @@
 
 Távoli MCP szerver, amelyen keresztül a Claude egyszerre több postafiókot kezel: Gmailt, Google Workspace-t és bármilyen IMAP/SMTP fiókot. A képességei a Claude beépített Gmail connectoráét követik (keresés, olvasás, mellékletek, piszkozatok, címkék, kuka, küldés), csak nem egy, hanem tetszőleges számú fiókra.
 
-> **Állapot:** 1. fázis kész: lokálisan futó, csak olvasó szerver, hitelesítés nélkül. Nyilvános címre még nem telepíthető.
+> **Állapot:** 2. fázis kész: lokálisan futó szerver írással és küldéssel, hitelesítés nélkül. Nyilvános címre még nem telepíthető.
 
 ## Mire jó
 
@@ -39,7 +39,7 @@ A mappa gyökerében egy `.mcp.json`:
 
 Az URL végén a fiók azonosítója áll. Ezen a címen a szerver csak azt az egy fiókot mutatja, és a kiadott token máshol nem érvényes. A fájlban nincs titok, nyugodtan commitolható.
 
-## Lokális futtatás (1. fázis)
+## Lokális futtatás (2. fázis)
 
 > Hitelesítés még nincs: a szerver csak a `127.0.0.1` címen figyel. Ne tedd elérhetővé más gépről.
 
@@ -47,6 +47,12 @@ Az URL végén a fiók azonosítója áll. Ezen a címen a szerver csak azt az e
 2. `cp .env.example .env`, és írd be minden fiókhoz az alkalmazásjelszót (ez a fájl is gitignore-olt). A változók nevének szabálya a `.env.example` elején van. Élesben ugyanezek a változók a deploy env fájljából jönnek.
 3. `pnpm install && pnpm dev`
 4. Claude Code-ban: `claude mcp add --transport http mail-local http://127.0.0.1:8787/mcp`, vagy egy fiókhoz: `.../mcp/<fiók-id>`.
+
+A fiók szintjét az `accounts.yaml` fiókonkénti `level` mezője adja (`read`, `draft`, `send`). Küldeni csak `send` szinten lehet.
+
+Tesztlevelet csak a saját címed `+mailmcp-<bármi>` alakjára küldj, soha valódi másik címzettnek.
+
+`MAILMCP_DEBUG=1` bekapcsolja az IMAP és SMTP protokoll naplóját a stderr-en (a jelszót az imapflow és a nodemailer is kitakarja). A napló a levéltartalmat is kiírja, ezért csak lokális hibakereséshez való, és az induló sor jelzi, hogy be van kapcsolva. Alapértelmezés: `0`.
 
 Fejlesztéshez: `pnpm test` (Docker kell a GreenMail integrációs tesztekhez), `pnpm test:unit` (Docker nélkül).
 

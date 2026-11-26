@@ -2,6 +2,8 @@ export type MailErrorCode =
   | 'config_invalid'
   | 'unknown_account'
   | 'invalid_id'
+  /** The call's arguments do not fit together or are missing; the ids themselves may be fine. */
+  | 'invalid_argument'
   | 'stale_id'
   | 'not_found'
   | 'mailbox_not_found'
@@ -11,7 +13,15 @@ export type MailErrorCode =
   | 'too_large'
   /** The tool does not offer this format (raw is per message only). */
   | 'unsupported_format'
-  | 'connection_failed';
+  | 'connection_failed'
+  /** The account's access level is too low for this tool. */
+  | 'not_permitted'
+  /** The mail server lacks a capability the tool needs. */
+  | 'unsupported_server'
+  /** The SMTP server refused or failed to send the message. */
+  | 'send_failed'
+  /** The IMAP server refused a flag, label or move change; changes stored before it are kept. */
+  | 'update_failed';
 
 /** An expected failure whose message is safe to show to the MCP client. */
 export class MailError extends Error {

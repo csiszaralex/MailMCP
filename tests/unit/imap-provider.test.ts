@@ -5,6 +5,7 @@ import type {
   FetchMessageObject,
   FetchQueryObject,
   MailboxObject,
+  MessageEnvelopeObject,
   MessageStructureObject,
 } from 'imapflow';
 import { ImapMailProvider, THREAD_MESSAGE_LIMIT } from '../../src/mail/imap-provider.js';
@@ -52,6 +53,7 @@ function fakeServer(
   searchResult: number[] | false | 'no-mailbox' = uids,
   structure: MessageStructureObject = STRUCTURE,
   partText = 'Hello text\n',
+  envelope: MessageEnvelopeObject = { replyTo: [{ name: 'Desk', address: 'desk@example.org' }] },
 ): Fake {
   const fetchQueries: FetchQueryObject[] = [];
   const downloads: { uid: string; part: string }[] = [];
@@ -60,7 +62,11 @@ function fakeServer(
     uid,
     size: 30 * 1024 * 1024 + 500,
     bodyStructure: structure,
-    envelope: { subject: `mail ${String(uid)}`, messageId: `<m${String(uid)}@example.org>` },
+    envelope: {
+      subject: `mail ${String(uid)}`,
+      messageId: `<m${String(uid)}@example.org>`,
+      ...envelope,
+    },
   });
   const client = {
     usable: true,
@@ -96,6 +102,25 @@ function providerFor(fake: Fake): ImapMailProvider {
 }
 
 const REF = { account: 'work', mailbox: 'INBOX', uidValidity: '9', uid: 4 };
+
+describe('ImapMailProvider message metadata', () => {
+  it('reports the Reply-To addresses in every format', async () => {
+    for (const format of ['metadata', 'plain', 'html'] as const) {
+      const detail = await providerFor(fakeServer([4])).getMessage(REF, format);
+      expect(detail.replyTo).toEqual([{ name: 'Desk', address: 'desk@example.org' }]);
+    }
+  });
+
+  it('reports no Reply-To when the envelope only repeats the sender', async () => {
+    // RFC 3501: without a Reply-To header the server fills the envelope's reply-to from From.
+    const bob = { name: 'Bob', address: 'bob@example.org' };
+    const envelope = { from: [bob], replyTo: [{ name: '', address: 'Bob@Example.org' }] };
+    const fake = fakeServer([4], [4], STRUCTURE, 'Hello text\n', envelope);
+    const detail = await providerFor(fake).getMessage(REF, 'metadata');
+    expect(detail.from).toEqual([bob]);
+    expect(detail.replyTo).toEqual([]);
+  });
+});
 
 describe('ImapMailProvider body download', () => {
   it('downloads only the text part for the plain format', async () => {

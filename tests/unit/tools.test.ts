@@ -39,6 +39,7 @@ function summary(acc: string): MessageSummary {
 function fakeProvider(acc: Account): MailProvider {
   const detail: MessageDetail = {
     ...summary(acc.id),
+    replyTo: [],
     messageIdHeader: '<m@x>',
     inReplyTo: null,
     attachments: [],
@@ -59,8 +60,13 @@ function fakeProvider(acc: Account): MailProvider {
 }
 
 const logs: LogRecord[] = [];
+/** Every account here is read-only, so no write tool is registered and no writer is asked for. */
+const noWriter: ToolDeps['writerFor'] = () => {
+  throw new Error('read tools never ask for a writer');
+};
 const deps: ToolDeps = {
   providerFor: (id) => fakeProvider(ACCOUNTS.find((a) => a.id === id) ?? account(id)),
+  writerFor: noWriter,
   log: (record) => logs.push(record),
 };
 
@@ -170,6 +176,7 @@ describe('tool calls', () => {
             ? Promise.reject(new MailError('connection_failed', `account ${id} is down`))
             : Promise.resolve({ total: 1, messages: [summary(id)] }),
       }),
+      writerFor: noWriter,
       log: (record) => logs.push(record),
     });
     const callSearch = async (toolDeps: ToolDeps) => {
@@ -261,6 +268,7 @@ describe('tool calls', () => {
         ...fakeProvider(account(id)),
         getMessage: () => Promise.reject(failure),
       }),
+      writerFor: noWriter,
       log: (record) => logs.push(record),
     };
     const server = buildMcpServer({ accounts: ACCOUNTS, scopedAccountId: undefined }, failingDeps);

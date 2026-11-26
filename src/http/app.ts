@@ -7,21 +7,31 @@ import {
   originValidationResponse,
 } from '@modelcontextprotocol/server';
 import type { Account } from '../config/types.js';
+import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
 import { buildMcpServer, type ToolDeps } from '../server.js';
+
+/**
+ * Request body limit (D14): the attachments as base64 (4/3 of their bytes) plus 2 MiB for the rest of the JSON.
+ * Above the MCP SDK's default of 4 MiB, below 16 MiB.
+ */
+export const MAX_REQUEST_BODY_BYTES =
+  Math.ceil((OUTGOING_ATTACHMENTS_LIMIT_BYTES * 4) / 3) + 2 * 1024 * 1024;
 
 /**
  * Phase 1: localhost only, no authentication. Never expose this on a public address;
  * phase 3 replaces the localhost guards with OAuth.
  */
 export function createApp(accounts: readonly Account[], deps: ToolDeps): Hono {
-  const all = createMcpHandler(() =>
-    buildMcpServer({ accounts, scopedAccountId: undefined }, deps),
+  const all = createMcpHandler(
+    () => buildMcpServer({ accounts, scopedAccountId: undefined }, deps),
+    { maxRequestBodySize: MAX_REQUEST_BODY_BYTES },
   );
   const perAccount = new Map(
     accounts.map((account) => [
       account.id,
-      createMcpHandler(() =>
-        buildMcpServer({ accounts: [account], scopedAccountId: account.id }, deps),
+      createMcpHandler(
+        () => buildMcpServer({ accounts: [account], scopedAccountId: account.id }, deps),
+        { maxRequestBodySize: MAX_REQUEST_BODY_BYTES },
       ),
     ]),
   );

@@ -1,13 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { serve } from '@hono/node-server';
-import { loadConfig, parsePort } from './config/load.js';
+import { loadConfig, parseDebug, parsePort } from './config/load.js';
 import { MailError } from './errors.js';
 import { createApp } from './http/app.js';
 import { tlsConnector } from './imap/client.js';
 import { ImapPool } from './imap/pool.js';
 import { errorClass, stderrLogger } from './log.js';
 import { ImapMailProvider } from './mail/imap-provider.js';
+import { ImapMailWriter } from './mail/imap-writer.js';
 import type { ToolDeps } from './server.js';
+import { tlsSmtpSender } from './smtp/sender.js';
 
 const HOSTNAME = '127.0.0.1';
 /** How long shutdown waits for open requests and IMAP logouts before it exits anyway. */
@@ -17,8 +19,12 @@ const accountsFile = process.env.MAILMCP_ACCOUNTS_FILE ?? 'accounts.yaml';
 
 let config;
 let port;
+let debug;
 try {
   port = parsePort(process.env.MAILMCP_PORT);
+  // Prints mail content to stderr (D25). Phase 3's public start-up must refuse this switch;
+  // this phase listens on 127.0.0.1 only.
+  debug = parseDebug(process.env.MAILMCP_DEBUG);
   config = loadConfig(await readFile(accountsFile, 'utf8'), process.env);
 } catch (err) {
   const message = err instanceof Error ? err.message : 'unknown error';
@@ -26,14 +32,20 @@ try {
   process.exit(1);
 }
 
-const pool = new ImapPool(tlsConnector(config.passwordFor));
+const pool = new ImapPool(tlsConnector(config.passwordFor, debug));
 const providers = new Map(config.accounts.map((a) => [a.id, new ImapMailProvider(a, pool)]));
+const smtp = tlsSmtpSender(config.passwordFor, debug);
+const writers = new Map(
+  [...providers].map(([id, p]) => [id, new ImapMailWriter(p.account, pool, p, smtp)]),
+);
+function lookup<T>(map: Map<string, T>, id: string): T {
+  const found = map.get(id);
+  if (found === undefined) throw new MailError('unknown_account', `Unknown account "${id}".`);
+  return found;
+}
 const deps: ToolDeps = {
-  providerFor: (id) => {
-    const provider = providers.get(id);
-    if (provider === undefined) throw new MailError('unknown_account', `Unknown account "${id}".`);
-    return provider;
-  },
+  providerFor: (id) => lookup(providers, id),
+  writerFor: (id) => lookup(writers, id),
   log: stderrLogger,
 };
 
@@ -42,7 +54,7 @@ const server = serve(
   { fetch: createApp(config.accounts, deps).fetch, hostname: HOSTNAME, port },
   () => {
     process.stderr.write(
-      `mailmcp: listening on http://${HOSTNAME}:${String(port)}/mcp (${String(accountCount)} accounts)\n`,
+      `mailmcp: listening on http://${HOSTNAME}:${String(port)}/mcp (${String(accountCount)} accounts)${debug ? ' (protocol debug log on: mail content is printed)' : ''}\n`,
     );
   },
 );

@@ -2,11 +2,12 @@ import { buffer } from 'node:stream/consumers';
 import type { FetchMessageObject, FetchQueryObject, SearchObject } from 'imapflow';
 import type { Account } from '../config/types.js';
 import { MailError } from '../errors.js';
-import { encodeMessageId, encodeThreadId, type MessageRef, type ThreadRef } from '../ids.js';
+import { encodeMessageId, type MessageRef, type ThreadRef } from '../ids.js';
 import type { ImapClient } from '../imap/client.js';
 import { resolveMailbox } from '../imap/mailboxes.js';
+import { withMailbox } from '../imap/mailbox-lock.js';
 import type { ImapPool } from '../imap/pool.js';
-import { translateQuery } from '../search/query.js';
+import { gmailSearch, translateQuery } from '../search/query.js';
 import {
   assertRawSize,
   BODY_TEXT_LIMIT_BYTES,
@@ -16,12 +17,16 @@ import {
   type RenderedBody,
   type TextPart,
 } from './body.js';
+import { assertCurrent, assertOwnAccount, messageGone } from './ref-checks.js';
+import { threadLocation } from './thread-locate.js';
 import {
   collectAttachments,
   messageDate,
+  messageThreadId,
   receivedDate,
+  replyToAddresses,
   textParts,
-  threadRootId,
+  threadIdFields,
   toAddresses,
 } from './message-parts.js';
 import type {
@@ -68,9 +73,9 @@ export class ImapMailProvider implements MailProvider {
 
   // async: a foreign id must reject the returned promise, not throw before one exists.
   async getMessage(ref: MessageRef, format: BodyFormat): Promise<MessageDetail> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     return this.pool.use(this.account, (client) =>
-      this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
+      withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
         assertCurrent(ref, uidValidity);
         const [detail] = await this.#details(client, ref.mailbox, uidValidity, [ref.uid], format);
         if (detail === undefined) throw messageGone();
@@ -80,7 +85,7 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async getThread(ref: ThreadRef, format: BodyFormat): Promise<ThreadPage> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     if (format === 'raw') {
       // Up to THREAD_MESSAGE_LIMIT raw sources of RAW_LIMIT_BYTES each would not fit in memory.
       throw new MailError(
@@ -89,31 +94,8 @@ export class ImapMailProvider implements MailProvider {
       );
     }
     return this.pool.use(this.account, async (client) => {
-      let path: string;
-      let criteria: SearchObject;
-      if (ref.kind === 'gmail') {
-        path = await resolveMailbox(
-          client,
-          { kind: 'special', use: '\\All' },
-          this.account.mailboxes,
-        );
-        criteria = { threadId: ref.gmailThreadId };
-      } else {
-        if (ref.rootMessageId === '') {
-          throw new MailError(
-            'not_found',
-            'This message has no Message-ID header, so it has no thread; use get_message.',
-          );
-        }
-        path = ref.mailbox;
-        criteria = {
-          or: [
-            { header: { 'message-id': ref.rootMessageId } },
-            { header: { references: ref.rootMessageId } },
-          ],
-        };
-      }
-      return this.#withMailbox(client, path, 'id', async (uidValidity) => {
+      const { path, criteria } = await threadLocation(client, this.account, ref);
+      return withMailbox(client, path, { access: 'read', from: 'id' }, async (uidValidity) => {
         const all = sortedUids(await client.search(criteria, { uid: true }), 'asc');
         if (all.length === 0) {
           throw new MailError('not_found', 'No messages of this thread were found; search again.');
@@ -128,9 +110,9 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async downloadAttachment(ref: MessageRef, attachmentId: string): Promise<AttachmentContent> {
-    this.#assertOwn(ref.account);
+    assertOwnAccount(this.account, ref.account);
     return this.pool.use(this.account, (client) =>
-      this.#withMailbox(client, ref.mailbox, 'id', async (uidValidity) => {
+      withMailbox(client, ref.mailbox, { access: 'read', from: 'id' }, async (uidValidity) => {
         assertCurrent(ref, uidValidity);
         const msg = await client.fetchOne(
           String(ref.uid),
@@ -173,64 +155,22 @@ export class ImapMailProvider implements MailProvider {
     );
   }
 
-  /** Second line of defense: the tool layer's inScope (read-tools.ts) checks the same with the same code. */
-  #assertOwn(accountId: string): void {
-    if (accountId !== this.account.id) {
-      throw new MailError(
-        'unknown_account',
-        `This id belongs to account "${accountId}", not "${this.account.id}".`,
-      );
-    }
-  }
-
   async #searchTarget(
     client: ImapClient,
     query: string,
   ): Promise<{ path: string; criteria: SearchObject }> {
     if (this.#gmail) {
+      const { mailbox, gmraw } = gmailSearch(query);
       const path = await resolveMailbox(
         client,
-        { kind: 'special', use: '\\All' },
+        { kind: 'special', use: mailbox },
         this.account.mailboxes,
       );
-      return { path, criteria: query.trim() === '' ? { all: true } : { gmraw: query } };
+      return { path, criteria: gmraw.trim() === '' ? { all: true } : { gmraw } };
     }
     const translated = translateQuery(query);
     const path = await resolveMailbox(client, translated.mailbox, this.account.mailboxes);
     return { path, criteria: translated.criteria };
-  }
-
-  /** `from` says where the path came from, so a missing mailbox gets the right hint. */
-  async #withMailbox<T>(
-    client: ImapClient,
-    path: string,
-    from: 'query' | 'id',
-    fn: (uidValidity: string) => Promise<T>,
-  ): Promise<T> {
-    let lock;
-    try {
-      lock = await client.getMailboxLock(path, { readOnly: true });
-    } catch (err) {
-      // imapflow sets mailboxMissing when SELECT/EXAMINE failed and LIST does not show the path.
-      if (err instanceof Error && 'mailboxMissing' in err && err.mailboxMissing === true) {
-        throw new MailError(
-          'mailbox_not_found',
-          from === 'id'
-            ? `The mailbox "${path}" of this id no longer exists, so the id is outdated; search again.`
-            : `Mailbox "${path}" does not exist on this account; use list_labels to see the mailboxes.`,
-          { cause: err },
-        );
-      }
-      throw err;
-    }
-    try {
-      const mailbox = client.mailbox;
-      // Only after the connection dropped right after the lock: not a missing mailbox.
-      if (mailbox === false) throw new Error('No mailbox is selected after the lock.');
-      return await fn(mailbox.uidValidity.toString());
-    } finally {
-      lock.release();
-    }
   }
 
   #page(
@@ -240,7 +180,7 @@ export class ImapMailProvider implements MailProvider {
     offset: number,
     limit: number,
   ): Promise<SearchPage> {
-    return this.#withMailbox(client, path, 'query', async (uidValidity) => {
+    return withMailbox(client, path, { access: 'read', from: 'query' }, async (uidValidity) => {
       const uids = sortedUids(await client.search(criteria, { uid: true }), 'desc');
       const slice = uids.slice(offset, offset + limit);
       const messages =
@@ -255,7 +195,8 @@ export class ImapMailProvider implements MailProvider {
       envelope: true,
       flags: true,
       internalDate: true,
-      ...(this.#gmail ? { labels: true, threadId: true } : { headers: ['references'] }),
+      ...threadIdFields(this.account),
+      ...(this.#gmail ? { labels: true } : {}),
     };
   }
 
@@ -291,6 +232,7 @@ export class ImapMailProvider implements MailProvider {
       if (msg === undefined) continue;
       details.push({
         ...this.#summary(path, uidValidity, msg),
+        replyTo: replyToAddresses(msg.envelope ?? {}),
         messageIdHeader: msg.envelope?.messageId ?? null,
         inReplyTo: msg.envelope?.inReplyTo ?? null,
         attachments: collectAttachments(msg.bodyStructure),
@@ -344,7 +286,7 @@ export class ImapMailProvider implements MailProvider {
   #summary(path: string, uidValidity: string, msg: FetchMessageObject): MessageSummary {
     return {
       id: encodeMessageId({ account: this.account.id, mailbox: path, uidValidity, uid: msg.uid }),
-      threadId: this.#threadId(path, msg),
+      threadId: messageThreadId(this.account, path, msg),
       account: this.account.id,
       mailbox: path,
       date: messageDate(msg),
@@ -357,41 +299,10 @@ export class ImapMailProvider implements MailProvider {
       labels: [...(msg.labels ?? [])],
     };
   }
-
-  #threadId(path: string, msg: FetchMessageObject): string {
-    if (this.#gmail && msg.threadId !== undefined) {
-      return encodeThreadId({
-        kind: 'gmail',
-        account: this.account.id,
-        gmailThreadId: msg.threadId,
-      });
-    }
-    const root = threadRootId(msg.headers, msg.envelope?.messageId) ?? '';
-    return encodeThreadId({
-      kind: 'references',
-      account: this.account.id,
-      mailbox: path,
-      rootMessageId: root,
-    });
-  }
-}
-
-/** A message id names a UID under one UIDVALIDITY; after the server rebuilt the mailbox it is void. */
-function assertCurrent(ref: MessageRef, uidValidity: string): void {
-  if (uidValidity !== ref.uidValidity) {
-    throw new MailError(
-      'stale_id',
-      'This message id is outdated (the mailbox was rebuilt); search again.',
-    );
-  }
-}
-
-function messageGone(): MailError {
-  return new MailError('not_found', 'Message not found; it may have been moved or deleted.');
 }
 
 /** imapflow resolves false when the server answers NO or BAD, and undefined without a mailbox. */
-function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
+export function sortedUids(found: number[] | false | undefined, order: 'asc' | 'desc'): number[] {
   if (found === undefined) {
     // We hold a mailbox lock, so no selected mailbox means the connection went away meanwhile.
     throw new MailError(

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PORT, loadConfig, parsePort, passwordEnvName } from '../../src/config/load.js';
+import {
+  DEFAULT_PORT,
+  loadConfig,
+  parseDebug,
+  parsePort,
+  passwordEnvName,
+} from '../../src/config/load.js';
 import { MailError } from '../../src/errors.js';
 
 const VALID = `
@@ -56,7 +62,26 @@ describe('parsePort', () => {
   });
 });
 
+describe('parseDebug', () => {
+  it('is off when unset or 0 and on for 1', () => {
+    expect(parseDebug(undefined)).toBe(false);
+    expect(parseDebug('0')).toBe(false);
+    expect(parseDebug('1')).toBe(true);
+  });
+
+  it('rejects anything else', () => {
+    for (const bad of ['yes', '', 'true', '2', ' 1']) {
+      expectConfigError(() => parseDebug(bad), 'MAILMCP_DEBUG');
+    }
+  });
+});
+
 describe('loadConfig', () => {
+  it('loads an archive mailbox override', () => {
+    const yaml = VALID.replace('{ junk: Spam }', '{ archive: Archive }');
+    expect(loadConfig(yaml, ENV).accounts[1]?.mailboxes.archive).toBe('Archive');
+  });
+
   it('fills Gmail endpoints and defaults the username to the address', () => {
     const config = loadConfig(VALID, ENV);
     const personal = config.accounts[0];

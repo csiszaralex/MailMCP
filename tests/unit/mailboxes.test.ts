@@ -34,6 +34,15 @@ describe('resolveMailbox', () => {
     );
   });
 
+  it('resolves the archive override and explains a missing archive mailbox', async () => {
+    expect(
+      await resolveMailbox(gmail, { kind: 'special', use: '\\Archive' }, { archive: 'Old' }),
+    ).toBe('Old');
+    const result = resolveMailbox(gmail, { kind: 'special', use: '\\Archive' }, {});
+    await expect(result).rejects.toMatchObject({ code: 'mailbox_not_found' });
+    await expect(result).rejects.toThrow('mailboxes.archive');
+  });
+
   it('explains how to fix a missing special mailbox', async () => {
     const result = resolveMailbox(gmail, { kind: 'special', use: '\\Junk' }, {});
     await expect(result).rejects.toBeInstanceOf(MailError);

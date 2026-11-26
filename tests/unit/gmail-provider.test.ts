@@ -26,6 +26,8 @@ const ACCOUNT: Account = {
 };
 
 const ALL_MAIL = '[Gmail]/Összes levél';
+const TRASH = '[Gmail]/Kuka';
+const SPAM = '[Gmail]/Spam';
 
 function fakeGmail(messages: FetchMessageObject[]) {
   const searches: { mailbox: string; query: SearchObject }[] = [];
@@ -40,6 +42,8 @@ function fakeGmail(messages: FetchMessageObject[]) {
       Promise.resolve([
         { path: 'INBOX', specialUse: '\\Inbox' },
         { path: ALL_MAIL, specialUse: '\\All' },
+        { path: TRASH, specialUse: '\\Trash' },
+        { path: SPAM, specialUse: '\\Junk' },
       ] as Partial<ListResponse>[] as ListResponse[]),
     getMailboxLock: (path: string, options?: MailboxLockOptions) => {
       locks.push({ path, options });
@@ -83,6 +87,41 @@ describe('ImapMailProvider on Gmail', () => {
       account: 'personal',
       gmailThreadId: '1790000000000000001',
     });
+  });
+
+  it('searches the trash and spam, which All Mail leaves out, for in:trash and in:spam', async () => {
+    const fake = fakeGmail([message]);
+    const provider = new ImapMailProvider(
+      ACCOUNT,
+      new ImapPool(() => Promise.resolve(fake.client)),
+    );
+    await provider.search('from:bob in:trash subject:"in:spam talk"', 0, 20);
+    await provider.search('IN:SPAM', 0, 20);
+    await provider.search('in:trashcan constructor', 0, 20);
+    // The in: aliases of the trash and spam select them too, as on other accounts.
+    await provider.search('in:bin hello', 0, 20);
+    await provider.search('in:junk', 0, 20);
+    await provider.search('in:constructor', 0, 20);
+    expect(fake.searches).toEqual([
+      { mailbox: TRASH, query: { gmraw: 'from:bob subject:"in:spam talk"' } },
+      { mailbox: SPAM, query: { all: true } },
+      { mailbox: ALL_MAIL, query: { gmraw: 'in:trashcan constructor' } },
+      { mailbox: TRASH, query: { gmraw: 'hello' } },
+      { mailbox: SPAM, query: { all: true } },
+      { mailbox: ALL_MAIL, query: { gmraw: 'in:constructor' } },
+    ]);
+  });
+
+  it('refuses in:trash together with in:spam', async () => {
+    const fake = fakeGmail([message]);
+    const provider = new ImapMailProvider(
+      ACCOUNT,
+      new ImapPool(() => Promise.resolve(fake.client)),
+    );
+    await expect(provider.search('in:trash in:spam', 0, 20)).rejects.toMatchObject({
+      code: 'unsupported_query',
+    });
+    expect(fake.searches).toEqual([]);
   });
 
   it('searches threads by X-GM-THRID', async () => {

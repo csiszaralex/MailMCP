@@ -4,6 +4,7 @@ import {
   collectAttachments,
   messageDate,
   receivedDate,
+  replyToAddresses,
   textParts,
   threadRootId,
   toAddresses,
@@ -22,6 +23,35 @@ describe('toAddresses', () => {
       { name: '', address: 'c@example.org' },
     ]);
     expect(toAddresses(undefined)).toEqual([]);
+  });
+});
+
+describe('replyToAddresses', () => {
+  const bob = { name: 'Bob', address: 'bob@example.org' };
+  const desk = { name: 'Desk', address: 'desk@example.org' };
+
+  it('is empty when it names exactly the From addresses', () => {
+    expect(replyToAddresses({ from: [bob], replyTo: [bob] })).toEqual([]);
+    expect(
+      replyToAddresses({ from: [bob], replyTo: [{ name: 'B', address: ' BOB@example.ORG' }] }),
+    ).toEqual([]);
+    expect(replyToAddresses({ from: [bob] })).toEqual([]);
+  });
+
+  it('keeps a distinct Reply-To', () => {
+    expect(replyToAddresses({ from: [bob], replyTo: [desk] })).toEqual([desk]);
+    expect(replyToAddresses({ from: [bob], replyTo: [bob, desk] })).toEqual([bob, desk]);
+    expect(replyToAddresses({ replyTo: [desk] })).toEqual([desk]);
+  });
+
+  it('keeps a Reply-To that names only some of several From addresses', () => {
+    expect(replyToAddresses({ from: [bob, desk], replyTo: [bob] })).toEqual([bob]);
+    expect(replyToAddresses({ from: [bob, desk], replyTo: [desk, bob] })).toEqual([]);
+  });
+
+  it('keeps a Reply-To that differs from From only by a +tag', () => {
+    const tagged = { name: 'Bob', address: 'bob+lists@example.org' };
+    expect(replyToAddresses({ from: [bob], replyTo: [tagged] })).toEqual([tagged]);
   });
 });
 

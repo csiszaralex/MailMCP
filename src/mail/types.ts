@@ -36,6 +36,11 @@ export interface AttachmentInfo {
 }
 
 export interface MessageDetail extends MessageSummary {
+  /**
+   * Where a reply goes (D19). From the IMAP envelope; empty when it only repeats a From address,
+   * as it does when the message has no Reply-To header (RFC 3501). Empty means replies go to From.
+   */
+  replyTo: Address[];
   messageIdHeader: string | null;
   inReplyTo: string | null;
   attachments: AttachmentInfo[];
