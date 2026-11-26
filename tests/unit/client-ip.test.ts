@@ -25,6 +25,28 @@ describe('clientIp', () => {
     expect(clientIp('::ffff:5.6.7.8', undefined, true)).toBe('5.6.7.8');
   });
 
+  it('keys an IPv6 address by its /64 prefix in one spelling', () => {
+    for (const spelling of [
+      '2001:DB8::1',
+      '2001:db8:0:0::1',
+      '2001:0db8:0000:0000:ffff:ffff:ffff:ffff',
+      '2001:db8::abcd:1.2.3.4',
+      '2001:db8::1%eth0',
+    ]) {
+      expect(clientIp(undefined, spelling, false)).toBe('2001:db8:0:0::/64');
+    }
+    expect(clientIp('2001:db8:1:2:3:4:5:6', undefined, true)).toBe('2001:db8:1:2::/64');
+    expect(clientIp(undefined, '::1', false)).toBe('0:0:0:0::/64');
+    expect(clientIp(undefined, '2001:db8:0:1::1', false)).not.toBe(
+      clientIp(undefined, '2001:db8::1', false),
+    );
+  });
+
+  it('leaves IPv4 and anything that is not an address as it is', () => {
+    expect(clientIp(undefined, '10.0.0.1', false)).toBe('10.0.0.1');
+    expect(clientIp('not-an-ip', undefined, true)).toBe('not-an-ip');
+  });
+
   it('returns unknown when nothing is known', () => {
     expect(clientIp(undefined, undefined, false)).toBe('unknown');
     expect(clientIp(undefined, undefined, true)).toBe('unknown');
