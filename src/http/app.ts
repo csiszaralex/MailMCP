@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import {
   createMcpHandler,
+  getOAuthProtectedResourceMetadataUrl,
   hostHeaderValidationResponse,
-  localhostAllowedHostnames,
-  localhostAllowedOrigins,
   originValidationResponse,
+  requireBearerAuth,
 } from '@modelcontextprotocol/server';
+import { resourceUrls } from '../auth/resources.js';
 import type { Account } from '../config/types.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
 import { buildMcpServer, type ToolDeps } from '../server.js';
+import { registerOAuthRoutes, type OAuthRouteDeps } from './oauth-routes.js';
 
 /**
  * Request body limit (D14): the attachments as base64 (4/3 of their bytes) plus 2 MiB for the rest of the JSON.
@@ -17,38 +19,90 @@ import { buildMcpServer, type ToolDeps } from '../server.js';
 export const MAX_REQUEST_BODY_BYTES =
   Math.ceil((OUTGOING_ATTACHMENTS_LIMIT_BYTES * 4) / 3) + 2 * 1024 * 1024;
 
-/**
- * Phase 1: localhost only, no authentication. Never expose this on a public address;
- * phase 3 replaces the localhost guards with OAuth.
- */
-export function createApp(accounts: readonly Account[], deps: ToolDeps): Hono {
-  const all = createMcpHandler(
-    () => buildMcpServer({ accounts, scopedAccountId: undefined }, deps),
-    { maxRequestBodySize: MAX_REQUEST_BODY_BYTES },
+export interface AppOptions {
+  /** MAILMCP_PUBLIC_URL: the only accepted Host and Origin, and the base of every resource. */
+  publicUrl: URL;
+  oauth: Omit<OAuthRouteDeps, 'publicUrl' | 'resources'>;
+}
+
+type McpHandler = ReturnType<typeof createMcpHandler>;
+
+/** 403 in the SDK's validation response shape when a present Origin is not exactly ours. */
+function foreignOrigin(origin: string | undefined, allowed: string): Response | undefined {
+  if (origin === undefined || origin === '' || origin === allowed) return undefined;
+  return Response.json(
+    { jsonrpc: '2.0', error: { code: -32000, message: 'Invalid Origin' }, id: null },
+    { status: 403 },
   );
-  const perAccount = new Map(
-    accounts.map((account) => [
-      account.id,
+}
+
+/**
+ * The MCP endpoints and the OAuth routes (D30, D33). Every request's Host must carry the public
+ * URL's hostname (DNS rebinding) and an Origin, when present, must be the public origin, or the
+ * answer is 403. Each MCP endpoint
+ * accepts only a Bearer token issued for its own resource identifier, so a token for /mcp/a is
+ * refused on /mcp and /mcp/b. A 401 points to that endpoint's protected resource metadata.
+ */
+export function createApp(accounts: readonly Account[], deps: ToolDeps, options: AppOptions): Hono {
+  const { publicUrl } = options;
+  const resources = resourceUrls(
+    publicUrl,
+    accounts.map((a) => a.id),
+  );
+  const handlers = new Map<string, McpHandler>([
+    [
+      '/mcp',
+      createMcpHandler(() => buildMcpServer({ accounts, scopedAccountId: undefined }, deps), {
+        maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+      }),
+    ],
+    ...accounts.map((account): [string, McpHandler] => [
+      `/mcp/${account.id}`,
       createMcpHandler(
         () => buildMcpServer({ accounts: [account], scopedAccountId: account.id }, deps),
         { maxRequestBodySize: MAX_REQUEST_BODY_BYTES },
       ),
     ]),
+  ]);
+  const endpoints = new Map(
+    [...resources].map(([path, resourceId]) => {
+      const handler = handlers.get(path);
+      if (handler === undefined) throw new Error(`No MCP handler for ${path}.`);
+      const resource = new URL(resourceId);
+      const gate = requireBearerAuth({
+        verifier: options.oauth.tokens,
+        expectedResource: resource,
+        resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resource),
+      });
+      const serve = async (request: Request): Promise<Response> => {
+        const auth = await gate(request);
+        if (auth instanceof Response) return auth;
+        return handler.fetch(request, { authInfo: auth });
+      };
+      return [path, serve];
+    }),
   );
 
+  // Both SDK checks compare URL hostnames, which keep the brackets of an IPv6 literal ('[::1]'),
+  // so publicUrl.hostname matches the parsed Host and Origin as is. They ignore the port, and the
+  // Origin check the scheme too, so foreignOrigin adds the exact origin match D30 asks for.
+  const allowedHostnames = [publicUrl.hostname];
   const app = new Hono();
   app.use('*', async (c, next) => {
     const rejected =
-      hostHeaderValidationResponse(c.req.raw, localhostAllowedHostnames()) ??
-      originValidationResponse(c.req.raw, localhostAllowedOrigins());
+      hostHeaderValidationResponse(c.req.raw, allowedHostnames) ??
+      originValidationResponse(c.req.raw, allowedHostnames) ??
+      foreignOrigin(c.req.header('origin'), publicUrl.origin);
     if (rejected !== undefined) return rejected;
     await next();
     return undefined;
   });
-  app.all('/mcp', (c) => all.fetch(c.req.raw));
+  registerOAuthRoutes(app, { publicUrl, resources, ...options.oauth });
+  app.all('/mcp', (c) => endpoints.get('/mcp')?.(c.req.raw) ?? c.notFound());
+  // An unknown account answers 404 before the token is looked at.
   app.all('/mcp/:accountId', (c) => {
-    const handler = perAccount.get(c.req.param('accountId'));
-    return handler === undefined ? c.notFound() : handler.fetch(c.req.raw);
+    const serve = endpoints.get(`/mcp/${c.req.param('accountId')}`);
+    return serve === undefined ? c.notFound() : serve(c.req.raw);
   });
   app.notFound((c) => c.text('Not found', 404));
   return app;
