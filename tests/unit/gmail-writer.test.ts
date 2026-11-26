@@ -221,8 +221,15 @@ describe('ImapMailWriter on Gmail', () => {
     expect(fake.moves).toEqual([{ from: ALL_MAIL, range: '77', destination: TRASH }]);
   });
 
-  it('changes nothing without MOVE', async () => {
+  it('trashes with UIDPLUS when the server lacks MOVE', async () => {
     const fake = fakeGmail(['UIDPLUS', 'X-GM-EXT-1']);
+    const out = await writerFor(fake).trash(message(REF));
+    expect(fake.moves).toEqual([{ from: REF.mailbox, range: '77', destination: TRASH }]);
+    expect(out.messageIds).toHaveLength(1);
+  });
+
+  it('changes nothing without MOVE and UIDPLUS', async () => {
+    const fake = fakeGmail(['X-GM-EXT-1']);
     await expect(writerFor(fake).trash(message(REF))).rejects.toMatchObject({
       code: 'unsupported_server',
     });

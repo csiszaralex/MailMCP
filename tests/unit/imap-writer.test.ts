@@ -12,6 +12,7 @@ import type { Account } from '../../src/config/types.js';
 import type { ImapClient } from '../../src/imap/client.js';
 import { ImapPool } from '../../src/imap/pool.js';
 import { MailError } from '../../src/errors.js';
+import { encodeMessageId } from '../../src/ids.js';
 import {
   ImapMailWriter,
   OLD_DRAFT_KEPT_WARNING,
@@ -99,6 +100,8 @@ interface Fake {
   /** Names of the client methods called, in order. */
   calls: string[];
   fetchQueries: FetchQueryObject[];
+  /** The options of every messageMove call. */
+  moveOptions: (MessageRangeOptions | undefined)[];
   /** Every messageDelete call with the mailbox lock held at that moment. */
   deletes: {
     range: string;
@@ -116,6 +119,7 @@ function fakeWith(options: FakeOptions): Fake {
   const calls: string[] = [];
   const fetchQueries: FetchQueryObject[] = [];
   const deletes: Fake['deletes'] = [];
+  const moveOptions: Fake['moveOptions'] = [];
   let held: HeldLock | undefined;
   const client = {
     usable: true,
@@ -168,8 +172,9 @@ function fakeWith(options: FakeOptions): Fake {
       if (options.deleteResult === 'throw') return Promise.reject(new Error('NO'));
       return Promise.resolve(options.deleteResult ?? true);
     },
-    messageMove: () => {
+    messageMove: (_range: string, _destination: string, rangeOptions?: MessageRangeOptions) => {
       calls.push('messageMove');
+      moveOptions.push(rangeOptions);
       return Promise.resolve(
         options.moveResult ?? {
           path: 'Drafts',
@@ -182,7 +187,7 @@ function fakeWith(options: FakeOptions): Fake {
     on: () => undefined,
     logout: () => Promise.resolve(),
   } as Partial<ImapClient> as ImapClient;
-  return { client, calls, fetchQueries, deletes };
+  return { client, calls, fetchQueries, deletes, moveOptions };
 }
 
 const UNUSED_READER = {} as MailProvider;
@@ -255,16 +260,16 @@ describe('ImapMailWriter capability checks', () => {
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
   });
 
-  it('moves nothing without MOVE', async () => {
-    const fake = fakeWith({ capabilities: ['UIDPLUS'] });
+  it('moves nothing without MOVE and UIDPLUS', async () => {
+    const fake = fakeWith({ capabilities: [] });
     await expect(writer(fake).deleteDraft(REF)).rejects.toMatchObject({
       code: 'unsupported_server',
     });
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
   });
 
-  it('sets no flag without MOVE when the label change also moves', async () => {
-    const fake = fakeWith({ capabilities: ['UIDPLUS'] });
+  it('sets no flag without MOVE and UIDPLUS when the label change also moves', async () => {
+    const fake = fakeWith({ capabilities: [] });
     await expect(
       writer(fake).updateLabels(
         { kind: 'message', ref: REF },
@@ -362,6 +367,17 @@ describe('ImapMailWriter.updateDraft', () => {
 });
 
 describe('ImapMailWriter.deleteDraft', () => {
+  it('moves by UID with UIDPLUS when the server lacks MOVE', async () => {
+    // imapflow then copies and removes the UIDs with UID EXPUNGE (D17).
+    const fake = fakeWith({ capabilities: ['UIDPLUS'] });
+    const out = await writer(fake).deleteDraft(REF);
+    expect(fake.moveOptions).toEqual([{ uid: true }]);
+    expect(out.messageIds).toEqual([
+      encodeMessageId({ account: 'work', mailbox: 'Trash', uidValidity: '3', uid: 11 }),
+    ]);
+    expect(out.warnings).toEqual([]);
+  });
+
   it('returns the new id from the uid map', async () => {
     const fake = fakeWith({ capabilities: ['UIDPLUS', 'MOVE'] });
     const out = await writer(fake).deleteDraft(REF);

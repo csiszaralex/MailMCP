@@ -45,13 +45,28 @@ export async function withMailbox<T>(
 /** Fails with `unsupported_server` when the server lacks a capability the action depends on. */
 export function requireCapability(
   client: ImapClient,
-  capability: 'UIDPLUS' | 'MOVE' | 'X-GM-EXT-1',
+  capability: 'UIDPLUS' | 'X-GM-EXT-1',
   action: string,
 ): void {
   if (!client.capabilities.has(capability)) {
     throw new MailError(
       'unsupported_server',
       `The mail server does not support ${capability}, which ${action} needs.`,
+    );
+  }
+}
+
+/**
+ * Fails with `unsupported_server` unless the server can move messages by UID (D17): with MOVE, or
+ * without it with UIDPLUS, where imapflow's messageMove copies the messages and then removes only
+ * them with UID EXPUNGE. Every move must therefore pass `{ uid: true }`; without UIDPLUS imapflow
+ * would send a plain EXPUNGE, which removes every message marked deleted in the mailbox.
+ */
+export function requireMove(client: ImapClient, action: string): void {
+  if (!client.capabilities.has('MOVE') && !client.capabilities.has('UIDPLUS')) {
+    throw new MailError(
+      'unsupported_server',
+      `The mail server supports neither MOVE nor UIDPLUS, which ${action} needs.`,
     );
   }
 }

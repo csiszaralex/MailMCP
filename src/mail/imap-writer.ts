@@ -3,7 +3,12 @@ import { MailError } from '../errors.js';
 import { encodeMessageId, type MessageRef } from '../ids.js';
 import type { ImapClient } from '../imap/client.js';
 import { resolveMailbox } from '../imap/mailboxes.js';
-import { requireCapability, unknownMailbox, withMailbox } from '../imap/mailbox-lock.js';
+import {
+  requireCapability,
+  requireMove,
+  unknownMailbox,
+  withMailbox,
+} from '../imap/mailbox-lock.js';
 import type { ImapPool } from '../imap/pool.js';
 import type { SpecialUse } from '../search/query.js';
 import type { SmtpSend } from '../smtp/sender.js';
@@ -185,8 +190,7 @@ export class ImapMailWriter implements MailWriter {
         { access: 'write', from: 'id' },
         async (uidValidity) => {
           assertCurrent(ref, uidValidity);
-          // Without MOVE imapflow emulates it with COPY and EXPUNGE (D17).
-          requireCapability(client, 'MOVE', 'delete_draft');
+          requireMove(client, 'delete_draft');
           return this.#move(client, ref.mailbox, [ref.uid], trash);
         },
       );
@@ -333,7 +337,7 @@ export class ImapMailWriter implements MailWriter {
       const moves = destination !== undefined && destination !== path;
       if (moves) {
         // Both before the first flag, so a move that cannot happen changes nothing.
-        requireCapability(client, 'MOVE', 'update_labels');
+        requireMove(client, 'update_labels');
         if (!(await client.list()).some((box) => box.path === destination)) {
           throw unknownMailbox(destination);
         }
@@ -356,8 +360,7 @@ export class ImapMailWriter implements MailWriter {
     to: SpecialUse | typeof RESTORE,
   ): Promise<MoveOutcome> {
     return this.pool.use(this.account, async (client) => {
-      // Without MOVE imapflow emulates it with COPY and EXPUNGE (D17).
-      requireCapability(client, 'MOVE', tool);
+      requireMove(client, tool);
       assertOwnAccount(this.account, target.ref.account);
       const source = from === undefined ? undefined : await this.#special(client, from);
       // A restore moves out of the trash or spam only: any other id would be moved by mistake.
@@ -505,7 +508,9 @@ export class ImapMailWriter implements MailWriter {
 
   /**
    * Moves `uids` of the locked mailbox `path` to `destination` and returns their new ids. A UID
-   * the server's COPYUID map does not list is left out and reported in one warning.
+   * the server's COPYUID map does not list is left out and reported in one warning. The caller has
+   * run requireMove; `{ uid: true }` keeps imapflow's MOVE fallback (COPY, then UID EXPUNGE) to
+   * these UIDs.
    */
   async #move(
     client: ImapClient,
@@ -514,7 +519,9 @@ export class ImapMailWriter implements MailWriter {
     destination: string,
   ): Promise<MoveOutcome> {
     const result = await client.messageMove(uids.join(','), destination, { uid: true });
-    // imapflow answers false, without throwing, when the server refuses the MOVE.
+    // imapflow answers false, without throwing, when the server refuses the MOVE. Without MOVE it
+    // also answers false when the COPY succeeded but the removal did not: the messages are then in
+    // both mailboxes.
     if (result === false) {
       throw new MailError(
         'update_failed',

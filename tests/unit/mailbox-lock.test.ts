@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MailboxLockOptions, MailboxObject } from 'imapflow';
 import type { ImapClient } from '../../src/imap/client.js';
-import { requireCapability, withMailbox } from '../../src/imap/mailbox-lock.js';
+import { requireCapability, requireMove, withMailbox } from '../../src/imap/mailbox-lock.js';
 import { MailError } from '../../src/errors.js';
 
 function fakeClient(capabilities: string[] = [], missing = false) {
@@ -88,5 +88,23 @@ describe('requireCapability', () => {
     expect(() => {
       requireCapability(fakeClient(['UIDPLUS']).client, 'UIDPLUS', 'update_draft');
     }).not.toThrow();
+  });
+});
+
+describe('requireMove', () => {
+  it('accepts MOVE or UIDPLUS', () => {
+    for (const capability of ['MOVE', 'UIDPLUS']) {
+      expect(() => {
+        requireMove(fakeClient([capability]).client, 'trash');
+      }, capability).not.toThrow();
+    }
+  });
+
+  it('refuses a server with neither as unsupported_server', () => {
+    const call = (): void => {
+      requireMove(fakeClient(['IDLE']).client, 'trash');
+    };
+    expect(call).toThrow(expect.objectContaining({ code: 'unsupported_server' }));
+    expect(call).toThrow('The mail server supports neither MOVE nor UIDPLUS, which trash needs.');
   });
 });
