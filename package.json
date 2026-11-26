@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=26.13"
   },
   "scripts": {
     "dev": "tsx --env-file-if-exists=.env src/main.ts",
@@ -41,7 +41,7 @@
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/mailparser": "^3.9.0",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.10",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",

@@ -43,6 +43,8 @@ Az URL végén a fiók azonosítója áll. Ezen a címen a szerver csak azt az e
 
 > Hitelesítés még nincs: a szerver csak a `127.0.0.1` címen figyel. Ne tedd elérhetővé más gépről.
 
+Node 26.13 vagy újabb kell. fnm-mel a `fnm use` a `.node-version` fájl alapján választja ki.
+
 1. `cp accounts.example.yaml accounts.yaml`, és töltsd ki a saját fiókjaiddal (ez a fájl gitignore-olt).
 2. `cp .env.example .env`, és írd be minden fiókhoz az alkalmazásjelszót (ez a fájl is gitignore-olt). A változók nevének szabálya a `.env.example` elején van. Élesben ugyanezek a változók a deploy env fájljából jönnek.
 3. `pnpm install && pnpm dev`
