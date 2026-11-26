@@ -1,0 +1,18 @@
+# Secrets, local data and everything the image build does not read.
+.env
+.env.*
+accounts.yaml
+data
+node_modules
+dist
+coverage
+.git
+.github
+.husky
+.superpowers
+.claude
+.vscode
+.idea
+docs
+tests
+*.log
