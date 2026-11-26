@@ -218,8 +218,11 @@ describe('write tool list', () => {
     for (const name of ['untrash', 'unmark_spam']) {
       const description = toolOf(tools, name).description ?? '';
       // ImapMailWriter restores to All Mail on Gmail (restorePath), not to the inbox.
-      expect(description, name).toContain('without the inbox');
-      expect(description, name).toContain('add INBOX with update_labels');
+      expect(description, name).toContain(
+        'On Gmail the message returns to All Mail with its labels; if it is not in the inbox afterwards, add INBOX with update_labels.',
+      );
+      // Unmeasured for spam: no claim that Gmail removes the inbox label.
+      expect(description, name).not.toMatch(/drops|removes/);
     }
   });
 });
