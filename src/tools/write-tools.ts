@@ -98,7 +98,7 @@ function labelAction(args: {
 }): LabelAction {
   if (args.action !== 'rename') return { action: args.action, name: args.name };
   if (args.newName === undefined) {
-    throw new MailError('unsupported_query', 'A rename needs newName.');
+    throw new MailError('invalid_argument', 'A rename needs newName.');
   }
   return { action: 'rename', name: args.name, newName: args.newName };
 }

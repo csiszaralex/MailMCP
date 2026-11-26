@@ -217,7 +217,9 @@ describe('send', () => {
   it('needs a recipient', async () => {
     const res = await call('send', { account: 'c', subject: 'Hi', body: 'x' });
     expect(res.isError).toBe(true);
-    expect(textOf(res)).toContain('unsupported_query');
+    expect(textOf(res)).toBe(
+      'invalid_argument: Give at least one recipient (to, cc or bcc), or a draftId.',
+    );
     expect(writerCalls).toEqual([]);
   });
 
@@ -235,7 +237,7 @@ describe('send', () => {
 
   it('needs the account parameter for a new mail on the all-accounts endpoint', async () => {
     const res = await call('send', { to: ['bob@example.org'] });
-    expect(textOf(res)).toContain('unknown_account');
+    expect(textOf(res)).toBe('invalid_argument: The account parameter is required.');
     expect(writerCalls).toEqual([]);
   });
 
@@ -273,7 +275,7 @@ describe('send', () => {
       { account: 'c', draftId: idOf('d') },
       scopeOf([...ACCOUNTS, other]),
     );
-    expect(textOf(res)).toBe('unknown_account: This id belongs to account "d", not "c".');
+    expect(textOf(res)).toBe('invalid_argument: This id belongs to account "d", not "c".');
     expect(writerCalls).toEqual([]);
   });
 

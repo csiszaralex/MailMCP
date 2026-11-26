@@ -28,7 +28,7 @@ describe('gmailLabelChange', () => {
 
   it('refuses TRASH and SPAM', () => {
     expect(() => gmailLabelChange({ add: ['TRASH'], remove: [] })).toThrow(
-      expect.objectContaining({ code: 'unsupported_query' }),
+      expect.objectContaining({ code: 'invalid_argument' }),
     );
     expect(() => gmailLabelChange({ add: [], remove: ['SPAM'] })).toThrow(
       expect.objectContaining({
@@ -40,7 +40,7 @@ describe('gmailLabelChange', () => {
 
 describe('folderDestination', () => {
   const expectRefused = (plan: () => void): void => {
-    expect(plan).toThrow(expect.objectContaining({ code: 'unsupported_query' }));
+    expect(plan).toThrow(expect.objectContaining({ code: 'invalid_argument' }));
   };
 
   it('moves to one added folder and ignores the flag labels', () => {

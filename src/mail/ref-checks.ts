@@ -3,13 +3,16 @@ import { MailError } from '../errors.js';
 import type { MessageRef } from '../ids.js';
 
 /**
- * Second line of defense: the tool layer checks the same first, with the same code: scopeHelpers().inScope
- * (tools/scope.ts) for every id, and create_draft (tools/write-tools.ts) with this function for its reply id.
+ * The id must belong to `account`. The tools pick the provider or writer by the id's own account
+ * (after scopeHelpers().inScope in tools/scope.ts), so here this is a second line of defense. The
+ * tools also call it directly where a call names an account and an id that may belong to another:
+ * send with draftId and create_draft with replyToMessageId. Such arguments conflict, hence
+ * invalid_argument; an account the endpoint lacks stays unknown_account (inScope).
  */
 export function assertOwnAccount(account: Account, accountId: string): void {
   if (accountId !== account.id) {
     throw new MailError(
-      'unknown_account',
+      'invalid_argument',
       `This id belongs to account "${accountId}", not "${account.id}".`,
     );
   }

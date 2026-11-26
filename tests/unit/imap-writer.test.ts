@@ -361,7 +361,7 @@ describe('ImapMailWriter.updateDraft', () => {
     ).rejects.toMatchObject({ code: 'stale_id' });
     await expect(
       writer(fake).updateDraft({ ...REF, account: 'other' }, PATCH),
-    ).rejects.toMatchObject({ code: 'unknown_account' });
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
     expect(fake.calls.filter((c) => CHANGES.includes(c))).toEqual([]);
   });
 });

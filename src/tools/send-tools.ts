@@ -95,13 +95,13 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
         }
         if (args.to.length + args.cc.length + args.bcc.length === 0) {
           throw new MailError(
-            'unsupported_query',
+            'invalid_argument',
             'Give at least one recipient (to, cc or bcc), or a draftId.',
           );
         }
         const accountId = chosen?.id ?? scope.scopedAccountId;
         if (accountId === undefined) {
-          throw new MailError('unknown_account', 'The account parameter is required.');
+          throw new MailError('invalid_argument', 'The account parameter is required.');
         }
         return jsonResult(await writerOf(accountId).send(toComposition(args)));
       },

@@ -50,7 +50,7 @@ export interface ScopeHelpers {
   readonly inScope: (accountId: string) => Account;
   /** The account a single-account call targets, or null if none was given; never throws, so it is safe as a log label. */
   readonly requestedAccount: (requested: string | undefined) => string | null;
-  /** The account a single-account call targets; unknown_account if none was given. */
+  /** The account a single-account call targets; invalid_argument if none was given. */
   readonly onlyAccount: (requested: string | undefined) => string;
 }
 
@@ -71,7 +71,8 @@ export function scopeHelpers(scope: ToolScope): ScopeHelpers {
     requestedAccount,
     onlyAccount: (requested) => {
       const id = requestedAccount(requested);
-      if (id === null) throw new MailError('unknown_account', 'The account parameter is required.');
+      if (id === null)
+        throw new MailError('invalid_argument', 'The account parameter is required.');
       return id;
     },
   };

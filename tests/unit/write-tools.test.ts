@@ -13,6 +13,7 @@ import type { MailWriter } from '../../src/mail/write-types.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../../src/mail/compose.js';
 import { encodeMessageId, encodeThreadId } from '../../src/ids.js';
 import { UNTRUSTED_NOTE } from '../../src/tools/result.js';
+import { scopeHelpers } from '../../src/tools/scope.js';
 
 const WRITE_TOOLS = [
   'create_draft',
@@ -325,7 +326,7 @@ describe('write tool calls', () => {
   it('refuses a reply to a message of another account', async () => {
     const ofC = encodeMessageId({ account: 'c', mailbox: 'INBOX', uidValidity: '1', uid: 5 });
     const foreign = await call('create_draft', { account: 'b', replyToMessageId: ofC });
-    expect(textOf(foreign)).toBe('unknown_account: This id belongs to account "c", not "b".');
+    expect(textOf(foreign)).toBe('invalid_argument: This id belongs to account "c", not "b".');
     const ofA = encodeMessageId({ account: 'a', mailbox: 'INBOX', uidValidity: '1', uid: 5 });
     const outOfScope = await call(
       'create_draft',
@@ -394,7 +395,7 @@ describe('write tool calls', () => {
     await call('manage_label', { account: 'b', action: 'rename', name: 'Old', newName: 'New' });
     await call('manage_label', { account: 'c', action: 'delete', name: 'Gone' });
     const missing = await call('manage_label', { account: 'b', action: 'rename', name: 'Old' });
-    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toBe('invalid_argument: A rename needs newName.');
     expect(writerCalls).toEqual([
       {
         account: 'b',
@@ -403,6 +404,13 @@ describe('write tool calls', () => {
       },
       { account: 'c', method: 'manageLabel', args: [{ action: 'delete', name: 'Gone' }] },
     ]);
+  });
+
+  it('reports a missing account as invalid_argument', () => {
+    // The tool schemas require the account on the all-accounts endpoint; onlyAccount is the backstop.
+    const call = (): string => scopeHelpers(scopeOf(ACCOUNTS)).onlyAccount(undefined);
+    expect(call).toThrow(expect.objectContaining({ code: 'invalid_argument' }));
+    expect(call).toThrow('The account parameter is required.');
   });
 
   it('refuses manage_label for an account outside the allowed ones', async () => {

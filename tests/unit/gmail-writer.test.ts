@@ -166,7 +166,7 @@ describe('ImapMailWriter on Gmail', () => {
     for (const name of ['TRASH', 'SPAM']) {
       await expect(
         writerFor(fake).updateLabels(message(REF), { add: [name], remove: [] }),
-      ).rejects.toMatchObject({ code: 'unsupported_query' });
+      ).rejects.toMatchObject({ code: 'invalid_argument' });
     }
     expect(fake.stores).toEqual([]);
   });

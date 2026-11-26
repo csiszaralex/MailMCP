@@ -150,7 +150,7 @@ describe('getMessage', () => {
     if (first === undefined) throw new Error('seed missing');
     const ref = { ...decodeMessageId(first.id), account: 'other' };
     await expect(provider.getMessage(ref, 'plain')).rejects.toMatchObject({
-      code: 'unknown_account',
+      code: 'invalid_argument',
     });
   });
 });

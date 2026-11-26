@@ -378,7 +378,7 @@ describe('updateLabels', () => {
     const ref = await freshRef('INBOX', 'Two folders');
     await expect(
       writer.updateLabels(message(ref), { add: ['Newsletters', 'Forwards'], remove: [] }),
-    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
     expect((await reader.getMessage(ref, 'metadata')).mailbox).toBe('INBOX');
   });
 
@@ -395,14 +395,14 @@ describe('updateLabels', () => {
     const ref = await freshRef('INBOX', 'Odd combination');
     await expect(
       writer.updateLabels(message(ref), { add: ['STARRED', 'Newsletters'], remove: ['INBOX'] }),
-    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
     await expect(
       writer.updateLabels(message(ref), { add: [], remove: ['Newsletters'] }),
-    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
     const filed = await freshRef('Newsletters', 'Not in the inbox');
     await expect(
       writer.updateLabels(message(filed), { add: [], remove: ['INBOX'] }),
-    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
     expect((await reader.getMessage(ref, 'metadata')).flags).not.toContain('\\Flagged');
   });
 });
