@@ -205,7 +205,7 @@ Konténeren belüli CLI (D36): jelszó hash és TOTP titok előállítása, az e
 
 ### Konténer
 
-`read_only`, tmpfs a `/tmp`-re, nem root felhasználó, `cap_drop: ALL`, `no-new-privileges`, saját hálózat a reverse proxy felé, `mem_limit`, `oom_score_adj`, `ports:` nincs.
+`read_only`, tmpfs a `/tmp`-re, nem root felhasználó, `cap_drop: ALL`, `no-new-privileges`, saját hálózat a reverse proxy felé (D42), `mem_limit`, `oom_score_adj`, `ports:` nincs.
 
 ### Levelezőszerverek felé
 
@@ -229,8 +229,8 @@ Levéltartalom, jelszó és token soha nem kerül a logba. Minden eszközhívás
 | D33 | Erőforráshoz kötés: a token csak azon az erőforráson érvényes, amelyre kiadták; a `/mcp` címre kiadott token a `/mcp/<fiók-id>` címen sem. Az ellenőrzés az SDK `requireBearerAuth` segédjével megy (`expectedResource`), a `401` az adott végpont saját metaadat címét adja | Egyetlen szabály, kivétel nélkül. A `/mcp` minden fiókot elér, ezért a „minden fiókhoz érvényes” token ott is ezt jelenti |
 | D34 | Próbálkozáskorlát: IP-nként csúszó ablak, 15 percen belül legfeljebb 5 hibás kísérlet. Az ötödik után a következő kísérletre `429` jár `Retry-After` fejléccel, egészen addig, amíg a legrégebbi számolt hiba ki nem csúszik a 15 perces ablakból; akkor újra lehet próbálkozni. Ha 15 percen belül mindenhonnan együtt legalább 20 hibás kísérlet volt, a bejelentkezés 3 másodpercenként csak egy kísérletet fogad, a többire `429`. Sikeres belépés törli az IP számlálóját. A jelszó hash mindig kiszámolódik, a hibaüzenet nem árulja el, melyik mező volt hibás. A kliens címe `MAILMCP_BEHIND_PROXY=1` mellett az `X-Forwarded-For` utolsó eleme, különben a kapcsolat címe. Az IPv4-be ágyazott IPv6 cím (`::ffff:1.2.3.4`) sima IPv4 lesz, minden más IPv6 cím a /64 előtagja egységes alakban (`2001:DB8::1` és `2001:db8:0:0::1` egyaránt `2001:db8:0:0::/64`) | Az infra repó Traefikje nem bízik a bejövő `X-Forwarded-For`-ban (nincs `forwardedHeaders.trustedIPs`), ezért az utolsó elemet ő írja; a korábbiakat a kliens hamisíthatja. A globális korlát a sok címről jövő próbálkozást fogja meg. Egy IPv6 végpont rendszerint egy egész /64-et kap, és abból bármelyik címet használhatja, ezért a teljes címre szabott korlát nem fogná meg |
 | D35 | CIMD letöltés: csak `https://claude.ai` és `https://claude.com` originről (D10), átirányítás követése nélkül, 5 másodperces időkorláttal, legfeljebb 64 KiB, JSON. A dokumentum `client_id` mezője egyezik az URL-lel, a `token_endpoint_auth_method` `none`, a `redirect_uris` nem üres. A dokumentum 10 percig a memóriában marad, a sikertelen letöltés hibája 60 másodpercig, és addig ugyanez a hiba jön vissza. Egy `client_id`-hoz egyszerre egy letöltés fut, az egyidejű kérések ezen osztoznak. Összesen legfeljebb 4 letöltés fut egyszerre; a további, gyorsítótárban nem lévő `client_id` azonnal hibát kap („Too many client metadata requests, try again.”), nem áll sorba. A terhelés miatti elutasítás nem kerül a hibák közé | Az átirányítás követése kivinné a letöltést az engedélyezett originről. A Claude a discovery-re és a tokenre 10 másodpercet vár, a letöltésnek bele kell férnie. Az engedélyezett originen bárki bármilyen útvonalat megadhat `client_id`-ként, ezért a korlátok nélkül a szerver tetszőleges számú kimenő kérést indítana |
-| D36 | CLI: `pnpm cli <parancs>` (fejlesztésben), `node dist/cli.js <parancs>` (konténerben). Parancsok: `hash-password` (rejtve bekéri a jelszót, csak a hash-t írja ki), `totp-setup` (új titok és `otpauth://` cím), `tokens list` (engedélyezések: id, kliens host, erőforrás, létrehozás, utolsó használat), `tokens revoke <id>`. Ha a `MAILMCP_DATA_DIR` alatt nincs adatbázis, a `tokens` parancsok az útvonalat megnevezve 1-es kóddal kilépnek, és nem hoznak létre üres adatbázist. A Docker healthcheck parancs a 4. fázisba kerül | A titkok előállítása is a szerver kódjával megy, így a formátum biztosan egyezik |
-| D37 | Naplózás: minden OAuth eseményről egy sor (elutasított authorize kérés, bejelentkezés sikere, hibája vagy tiltása, kiadott token, csere, a refresh token vagy a code újrafelhasználása miatti visszavonás) a kliens hostjával, az erőforrással és a kliens IP-címével; az IP minden eseménynél ott van, a D34 szerinti alakban. Token, code, jelszó és TOTP kód soha | A „Naplózás” pont szabálya az OAuth eseményekre |
+| D36 | CLI: `pnpm cli <parancs>` (fejlesztésben), `node dist/cli.js <parancs>` (konténerben). Parancsok: `hash-password` (rejtve bekéri a jelszót, csak a hash-t írja ki), `totp-setup` (új titok és `otpauth://` cím), `tokens list` (engedélyezések: id, kliens host, erőforrás, létrehozás, utolsó használat), `tokens revoke <id>`. Ha a `MAILMCP_DATA_DIR` alatt nincs adatbázis, a `tokens` parancsok az útvonalat megnevezve 1-es kóddal kilépnek, és nem hoznak létre üres adatbázist. A Docker healthcheck parancs a `health` (D40) | A titkok előállítása is a szerver kódjával megy, így a formátum biztosan egyezik |
+| D37 | Naplózás: minden OAuth eseményről egy sor (elutasított authorize kérés, bejelentkezés sikere, hibája vagy tiltása, kiadott token, csere, a refresh token vagy a code újrafelhasználása miatti visszavonás) a kliens azonosítójával (D47), az erőforrással és a kliens IP-címével; az IP minden eseménynél ott van, a D34 szerinti alakban. Token, code, jelszó és TOTP kód soha | A „Naplózás” pont szabálya az OAuth eseményekre |
 
 Az OAuth végpontok hibái az RFC 6749 szerinti JSON-ök (`error`, `error_description`), nem a levéleszközök hibakódjai.
 
@@ -239,21 +239,37 @@ Az OAuth végpontok hibái az RFC 6749 szerinti JSON-ök (`error`, `error_descri
 ### App repó
 
 - Publikus GitHub repó, tooling a WebFetch mintájára (pnpm, TypeScript, ESLint, Prettier, vitest, husky).
-- GitHub Actions: lint, típusellenőrzés, tesztek, image build, push a ghcr.io-ra `:latest` címkével.
+- GitHub Actions: lint, típusellenőrzés, formázás, tesztek, build, majd a main ágon image build és push a ghcr.io-ra `:latest` és `:sha-<commit>` címkével (D41).
 
 ### Telepítés
 
-A konkrét telepítés (hostnév, reverse proxy, titkok, mentés) egy külön, privát infra repóban él, annak konvencióival. Ez a repó csak az általános követelményeket rögzíti:
+A konkrét telepítés (hostnév, reverse proxy, titkok) egy külön, privát infra repóban él, annak konvencióival. Ez a repó csak az általános követelményeket rögzíti:
 
 - Docker Compose szolgáltatás, publikált port nélkül; a forgalmat egy TLS-t lezáró reverse proxy hozza egy nyilvános HTTPS hostnévről (a claude.ai az Anthropic szervereiről hívja, ezért belső vagy VPN mögötti cím nem jó);
 - `mem_limit: 256m`, `NODE_OPTIONS=--max-old-space-size=170` (a limit kb. kétharmada);
-- `oom_score_adj` pozitív: memóriaszűkénél ez a szolgáltatás álljon le a fontosabbak előtt, a levelezés néhány perc kiesést elbír;
-- a SQLite named volume-on van, és a mentése alatt a konténer áll (WAL miatt);
+- `oom_score_adj: 500`: memóriaszűkénél ez a szolgáltatás álljon le a fontosabbak előtt, a levelezés néhány perc kiesést elbír (D45);
+- a SQLite named volume-on van, mentés nélkül (D43);
 - `accounts.yaml` csak olvashatóként csatolva, a titkok titkosított env fájlból. Compose interpolációnál az argon2 hash `$` jeleit `$$`-ra kell cserélni.
 
 ### Health check
 
-Docker healthcheck, amely a konténeren belül futtat egy CLI parancsot (nem HTTP útvonal). Külső figyelés (UptimeRobot) a nyilvános OAuth metaadat végpontra állítható.
+Docker healthcheck az image-ben, amely a konténeren belül a `health` CLI parancsot futtatja (D40); külön HTTP útvonal nincs. Külső figyelés a nyilvános OAuth metaadat végpontra (D48).
+
+### Telepítés (4. fázis döntései, 2026-11-26)
+
+| # | Döntés | Indok |
+|---|---|---|
+| D38 | Hostnév: `mailmcp.csalex.dev`. Az infra stackben egy helyen (`APP_HOST`), ebből jön a reverse proxy szabálya és a `MAILMCP_PUBLIC_URL=https://<APP_HOST>` is | A cím és az erőforrás-azonosítók nem csúszhatnak szét. A wildcard DNS és tanúsítvány már megvan |
+| D39 | Image: többlépcsős build. A futtató réteg `node:26.13.1-alpine3.24`, benne csak a `dist/` és a prod függőségek, curl és pnpm nélkül, `node` (uid 1000) felhasználóval. A pnpm a build rétegben `npm install -g`-vel jön, a `package.json` `packageManager` mezőjének verziójával; a telepítés `--frozen-lockfile --ignore-scripts`. Az image alapértékei: `MAILMCP_HOST=0.0.0.0`, `MAILMCP_DATA_DIR=/data` (a `node` felhasználó tulajdona), `MAILMCP_ACCOUNTS_FILE=/config/accounts.yaml`. A Node verzió egyetlen forrása a `.node-version`: a CI ezt adja a `setup-node`-nak, a Dockerfile `FROM` sorait egy unit teszt veti össze vele | A Node 26 image-ben nincs corepack (a Node 25 óta nem része a kiadásnak). A teszt build arg helyett azért, hogy a kézi `docker build` paraméter nélkül is működjön. Natív modul nincs, ezért a prod függőségek egyszerűen átmásolhatók |
+| D40 | Healthcheck: `node dist/cli.js health`. A `MAILMCP_HOST` címére csatlakozik (a `0.0.0.0` helyett `127.0.0.1`, a `::` helyett `::1`), a `MAILMCP_PORT`-on lekéri a `/.well-known/oauth-authorization-server` címet a `MAILMCP_PUBLIC_URL` hostjával mint `Host` fejléccel, és 200-ra 0-val, minden másra (más kód, hiba, 3 s időkorlát) 1-gyel lép ki. A `HEALTHCHECK` a Dockerfile-ban van | A valódi szervert és a Host ellenőrzést is végigjárja, curl nélkül. Az image-ben van, mert a parancs az app belső működéséhez kötött, és így az image verziójával együtt változik |
+| D41 | CI (GitHub Actions, `ubuntu-latest`): PR-on és main pushon `pnpm install --frozen-lockfile`, `lint`, `typecheck`, `format:check` (`prettier --check .`), `test` (a GreenMail integrációs tesztekkel, testcontainersszel) és `build`. Main pushon, ha ez zöld, image build és push `ghcr.io/csiszaralex/mailmcp:latest` és `:sha-<commit>` címkével. A visszaállás egy korábbi `:sha-` címke | Az infra repó konvenciója: saját image `:latest`-en, a szerver 5 percenként húzza |
+| D42 | Hálózat: a szolgáltatás egy saját belső (`internal`) hálózaton éri el a reverse proxyt, és egy külön hálózaton megy ki az IMAP, SMTP és CIMD forgalom. A közös proxy hálózaton nincs rajta | A szerver memóriában tartja az összes postafiók jelszavát; egy másik, feltört publikus app a közös hálózatról közvetlenül elérné, és ott hamis `X-Forwarded-For`-ral a D34 IP-nkénti korlátját is megkerülhetné |
+| D43 | Mentés nincs. A kötetben csak engedélyezések, tokenek, hibás belépések és TOTP lépések vannak | Elvesztésük ára egy újbóli bejelentkezés a klienseken. A mentés a WAL miatt minden éjjel leállítaná a konténert |
+| D44 | A reverse proxyn nincs külön rate limit | A D34 korlát még az argon2 számítás előtt dönt (`AuthorizationFlow.complete`), így támadás alatt a globális korlát 3 másodpercenként legfeljebb egy hash számítást enged |
+| D45 | `oom_score_adj: 500`. A `mem_limit` a telepítés után mérve hangolandó: egy nagy melléklet letöltése alatt a konténer memóriája | Az infra repó a fontos szolgáltatásokat negatív értékkel védi; ez a szolgáltatás menjen előbb |
+| D46 | Titkok: az éles jelszó hash és TOTP titok lokálisan, a `pnpm cli` parancsokkal készül, a postafiók jelszavakkal együtt az infra repó titkosított env fájljába kerül. Az `accounts.yaml` az infra repóban van, csak olvashatóként csatolva. A lokális próbák titkai élesben nem használhatók | A titok soha nem megy át a beszélgetésen vagy a szerver parancssorán |
+| D47 | A D37 naplósorok `client` mezője a teljes `client_id` URL, nem csak a hostja. Az átvétel után az engedélyezett kliensek listája originek helyett a mért pontos `client_id` URL-ek | A pontos URL nem titok, és csak a naplóból mérhető, mit küld a claude.ai. A pontos lista szűkebb, mint az origin: a claude.ai alatt más útvonalon közzétett dokumentum nem lehet kliens |
+| D48 | Külső figyelés: a nyilvános metaadat végpont `200`, a `/mcp` token nélkül `401`. Az infra repó közös végpontlistájába kerül, amelyből a kézi ellenőrző script és a monitorozás is dolgozik | Egy hely a várt válaszoknak. A `401` azt méri, hogy a hitelesítés él |
 
 ## Tesztelés
 
@@ -288,8 +304,11 @@ Tesztlevél csak Alex saját, plusz jeles teszt címére megy (`<cím>+mailmcp-<
 | Az SDK `requireBearerAuth` `expectedResource` opciója a verifier által adott `AuthInfo.resource`-szal hasonlít (töredék és egy záró perjel nélkül), és elutasítja a lejárat nélküli tokent. A `buildOAuthProtectedResourceMetadata` localhoston kívül HTTPS issuert követel | `dist/index.d.mts` (2026-11-26) |
 | Az infra repó Traefikje nem bízik a bejövő `X-Forwarded-For`-ban (nincs `forwardedHeaders.trustedIPs`), és felülírja | `proxy/docker-compose.yml`, `kaneo/docker-compose.yml` megjegyzése (2026-11-26) |
 | A Node `--env-file` a `$` jeleket változatlanul hagyja (az argon2 hash idézőjel nélkül is épen jön át) | `node --env-file` egy `$argon2id$…` értékkel (2026-11-26) |
+| A `node:26.13.1-alpine3.24` image-ben nincs corepack, az npm 11.20.0, a `node` felhasználó uid/gid 1000 | `docker run --rm node:26.13.1-alpine3.24 sh -c 'corepack --version; npm --version; id node'` (2026-11-26) |
+| Az infra gép tűzfala a konténerek minden kimenő forgalmát átengedi (a forward láncban `iifname "br-*" accept`), az IMAP és SMTP portokhoz nem kell új szabály | az infra repó `host/etc/host-firewall.nft` fájlja (2026-11-26) |
+| A 3. fázis kézi próbáján (2026-11-26) a Claude Code lokálisan CIMD-vel (`client_id` hostja `claude.ai`) és `resource` paraméterrel jelentkezett be, a revoke után újra bejelentkezést kért, öt hibás TOTP után a hatodik próbát a korlát elutasította | a szerver naplója (`login_ok`, `token_issued`), `pnpm cli tokens list` és `tokens revoke` |
 
-Nem mérhető most, az átvételi teszten mérjük: hogy a claude.ai (hosztolt) kliens a mi szerverünkkel valóban CIMD-t választ-e, és hogy mindkét kliens küldi-e a `resource` paramétert. A Claude Code-ot a 3. fázis végén lokálisan (`http://127.0.0.1`) mérjük: a szerver a CIMD dokumentumot kimenő kéréssel tölti le a claude.ai-ról, a visszahívás pedig loopback, ezért ehhez nem kell nyilvános cím. A claude.ai csak a 4. fázis nyilvános telepítése után próbálható ki, mert az Anthropic szervereiről hívja a szervert.
+Nem mérhető most, az átvételi teszten mérjük: hogy a claude.ai (hosztolt) kliens a mi szerverünkkel valóban CIMD-t választ-e, mi a pontos `client_id`-je, és hogy küldi-e a `resource` paramétert. A Claude Code-ot a 3. fázis végén lokálisan mértük (lásd fent). A claude.ai csak a 4. fázis nyilvános telepítése után próbálható ki, mert az Anthropic szervereiről hívja a szervert.
 
 A 2. fázis kézi próbáján (2026-11-25) mért eredmények: a Gmail SMTP egy példányt ment a Sent mappába, a törölt piszkozat a kukába kerül, a kukából visszaállított levél a címkéit megtartja, a beérkezettek címkéjét nem; a work fiók Courier-IMAP szervere UIDPLUS-t ad, MOVE-ot és SPECIAL-USE-t nem, a Sent mappát név alapján találja meg; az IMAP ENVELOPE a hiányzó Reply-To helyett a From címet adja. Az eredeti mérési lista:
 
