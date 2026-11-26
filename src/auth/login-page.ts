@@ -14,7 +14,11 @@ function csp(formAction: string): string {
   return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'`;
 }
 
-/** D31 headers for the error page; the pages carry inline styles and nothing else. */
+/**
+ * D31 headers for the error page; the pages carry inline styles and nothing else. The error page
+ * has no form and no link, so no-referrer costs nothing there and never leaks its URL (which
+ * carries the client's state) anywhere.
+ */
 export const PAGE_HEADERS: Readonly<Record<string, string>> = {
   'Content-Security-Policy': csp("'self'"),
   'Cache-Control': 'no-store',
@@ -27,9 +31,17 @@ export const PAGE_HEADERS: Readonly<Record<string, string>> = {
  * D31 headers for the login page. Chrome applies form-action to the redirect that answers the
  * form too, so the redirect_uri's origin is allowed besides 'self'. The origin comes from
  * URL.origin, which cannot carry a space or a semicolon.
+ *
+ * Referrer-Policy is same-origin, not no-referrer: under no-referrer the Fetch standard serializes
+ * the form POST's Origin header as "null", and POST /authorize refuses every Origin but its own.
+ * same-origin still sends no referrer to another origin, the client's redirect_uri included.
  */
 export function loginPageHeaders(view: LoginView): Readonly<Record<string, string>> {
-  return { ...PAGE_HEADERS, 'Content-Security-Policy': csp(`'self' ${view.redirectOrigin}`) };
+  return {
+    ...PAGE_HEADERS,
+    'Content-Security-Policy': csp(`'self' ${view.redirectOrigin}`),
+    'Referrer-Policy': 'same-origin',
+  };
 }
 
 const ESCAPES: Readonly<Record<string, string>> = {

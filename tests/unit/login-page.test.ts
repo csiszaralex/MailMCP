@@ -100,10 +100,23 @@ describe('loginPageHeaders', () => {
     expect(headers['Content-Security-Policy']).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' http://127.0.0.1:53124; frame-ancestors 'none'",
     );
-    expect({ ...headers, 'Content-Security-Policy': undefined }).toEqual({
+    expect({
+      ...headers,
+      'Content-Security-Policy': undefined,
+      'Referrer-Policy': undefined,
+    }).toEqual({
       ...PAGE_HEADERS,
       'Content-Security-Policy': undefined,
+      'Referrer-Policy': undefined,
     });
+  });
+
+  it('uses Referrer-Policy same-origin, so the form POST carries a real Origin', () => {
+    // Under no-referrer the Fetch standard serializes the POST's Origin as "null", and
+    // POST /authorize answers 403 to any Origin but its own.
+    const headers = loginPageHeaders(VIEW);
+    expect(headers['Referrer-Policy']).toBe('same-origin');
+    expect(headers['Referrer-Policy']).not.toBe(PAGE_HEADERS['Referrer-Policy']);
   });
 });
 

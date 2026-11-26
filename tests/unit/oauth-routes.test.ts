@@ -226,6 +226,7 @@ describe('GET /authorize', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
     expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('referrer-policy')).toBe('same-origin');
     expect(res.headers.get('content-security-policy')).toContain(
       "form-action 'self' http://127.0.0.1:53124",
     );
