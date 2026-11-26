@@ -668,10 +668,8 @@ describe('reply', () => {
         { name: 'Desk', address: 'desk@example.com' },
       ]);
     }
-    // Without a Reply-To header the IMAP envelope repeats From (RFC 3501).
-    expect((await reader.getMessage(ref, 'metadata')).replyTo).toEqual([
-      { name: 'Carol', address: 'carol@example.com' },
-    ]);
+    // Without a Reply-To header the IMAP envelope repeats From (RFC 3501); that copy is hidden.
+    expect((await reader.getMessage(ref, 'metadata')).replyTo).toEqual([]);
     const out = await writer.reply(original, replyInput({ body: 'Noted.', replyAll: true }));
     expect(out).toMatchObject({ to: ['desk@example.com'], cc: [], bcc: [] });
   });

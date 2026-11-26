@@ -132,7 +132,7 @@ export function registerSendTools(server: McpServer, scope: ToolScope, deps: Too
     'reply',
     {
       title: 'Reply to an email',
-      description: `Replies to a message in its conversation: threading headers, a "Re:" subject and the original quoted. Without to and cc the recipients are the Reply-To or From address of the original (the original's recipients if you sent it); replyAll adds its To and Cc addresses, without your own. get_message shows replyTo, so you can check where a reply goes before sending it. ${IMMEDIATE} Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. ${RETURNS} ${UNTRUSTED_NOTE}`,
+      description: `Replies to a message in its conversation: threading headers, a "Re:" subject and the original quoted. Without to and cc the recipients are the Reply-To or From address of the original (the original's recipients if you sent it); replyAll adds its To and Cc addresses, without your own. get_message shows replyTo (empty when replies go to From), so you can check where a reply goes before sending it. ${IMMEDIATE} Attachments together at most ${ATTACHMENT_LIMIT_MB} MB decoded. ${RETURNS} ${UNTRUSTED_NOTE}`,
       inputSchema: z.object({
         messageId: messageIdField('reply to'),
         body: compositionFields.body,

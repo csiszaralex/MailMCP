@@ -16,6 +16,29 @@ export function toAddresses(list: MessageAddressObject[] | undefined): Address[]
   );
 }
 
+function comparable(address: string): string {
+  return address.trim().toLowerCase();
+}
+
+/**
+ * The envelope's Reply-To, or none when it names exactly the From addresses: without a Reply-To
+ * header the server fills the envelope's reply-to from From (RFC 3501), and showing that copy
+ * would suggest the sender asked for replies elsewhere. Hiding it keeps reply recipients as they
+ * were, since an empty Reply-To makes replyRecipients use From. A Reply-To naming only some of
+ * several From addresses stays, because it narrows the reply. Addresses are compared whole and
+ * lowercased, not by addressKey: a "+tag" variant of the sender is a deliberate Reply-To.
+ */
+export function replyToAddresses(envelope: {
+  from?: MessageAddressObject[] | undefined;
+  replyTo?: MessageAddressObject[] | undefined;
+}): Address[] {
+  const replyTo = toAddresses(envelope.replyTo);
+  const replyKeys = new Set(replyTo.map((a) => comparable(a.address)));
+  const fromKeys = new Set(toAddresses(envelope.from).map((a) => comparable(a.address)));
+  const same = replyKeys.size === fromKeys.size && [...replyKeys].every((k) => fromKeys.has(k));
+  return same ? [] : replyTo;
+}
+
 function isoDate(value: Date | string | undefined): string | null {
   if (value === undefined) return null;
   const date = new Date(value);
