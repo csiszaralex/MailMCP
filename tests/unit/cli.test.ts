@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parsePasswordHash, verifyPassword } from '../../src/auth/password.js';
 import { runCli, type CliIo } from '../../src/cli.js';
-import { Store } from '../../src/store/store.js';
+import { Store, storePath } from '../../src/store/store.js';
 
 const NOW = Date.UTC(2026, 10, 26, 12, 0, 0);
 const GOOD_PASSWORD = 'correct horse battery staple';
@@ -54,11 +54,11 @@ function harness(answers: string[], isTty = true): Harness {
 
 /** Creates the database the server would have created, with no grant in it. */
 function seedEmpty(): void {
-  Store.open(join(dir, 'mailmcp.sqlite')).close();
+  Store.open(storePath(dir)).close();
 }
 
 function seedGrant(id: string, revokedAt: number | null = null): void {
-  const store = Store.open(join(dir, 'mailmcp.sqlite'));
+  const store = Store.open(storePath(dir));
   try {
     store.insertGrant({
       id,
@@ -174,7 +174,7 @@ describe('tokens without a database', () => {
       expect(await runCli(args, h.io)).toBe(1);
       expect(h.out()).toBe('');
       expect(h.err()).toBe(
-        `No database at ${join(missing, 'mailmcp.sqlite')}. Is MAILMCP_DATA_DIR right?
+        `No database at ${storePath(missing)}. Is MAILMCP_DATA_DIR right?
 `,
       );
     }

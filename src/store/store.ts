@@ -1,6 +1,15 @@
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite';
+
+/** MAILMCP_DATA_DIR when it is unset (D27). */
+export const DEFAULT_DATA_DIR = './data';
+const STORE_FILE_NAME = 'mailmcp.sqlite';
+
+/** The SQLite file in a data directory (D27); the server and the CLI open the same one. */
+export function storePath(dataDir: string): string {
+  return join(dataDir, STORE_FILE_NAME);
+}
 
 /** How long login failures and used TOTP steps are kept (D34). */
 export const FAILURE_WINDOW_MS = 15 * 60_000;

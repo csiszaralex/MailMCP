@@ -15,8 +15,10 @@ import {
   renderLoginPage,
 } from '../auth/login-page.js';
 import {
+  accountMcpPath,
   AUTHORIZE_PATH,
   authorizationServerMetadata,
+  MCP_PATH,
   SUPPORTED_SCOPES,
   TOKEN_PATH,
 } from '../auth/resources.js';
@@ -26,7 +28,7 @@ import { clientIp } from './client-ip.js';
 export interface OAuthRouteDeps {
   publicUrl: URL;
   /** MCP endpoint path ('/mcp', '/mcp/<id>') to its resource identifier, from resourceUrls. */
-  resources: Map<string, string>;
+  resources: ReadonlyMap<string, string>;
   flow: AuthorizationFlow;
   tokens: TokenService;
   behindProxy: boolean;
@@ -180,12 +182,14 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
   // Hono answers HEAD with the GET handler, so the catch-all after it sees every other method.
   app.get(AUTHORIZATION_SERVER_METADATA_PATH, () => metadata(asBody));
   app.all(AUTHORIZATION_SERVER_METADATA_PATH, () => methodNotAllowed('GET, HEAD'));
-  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp`, () => metadata(prBodies.get('/mcp')));
-  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp`, () => methodNotAllowed('GET, HEAD'));
-  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp/:accountId`, (c) =>
-    metadata(prBodies.get(`/mcp/${c.req.param('accountId')}`)),
+  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}${MCP_PATH}`, () =>
+    metadata(prBodies.get(MCP_PATH)),
   );
-  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp/:accountId`, () =>
+  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}${MCP_PATH}`, () => methodNotAllowed('GET, HEAD'));
+  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}${MCP_PATH}/:accountId`, (c) =>
+    metadata(prBodies.get(accountMcpPath(c.req.param('accountId')))),
+  );
+  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}${MCP_PATH}/:accountId`, () =>
     methodNotAllowed('GET, HEAD'),
   );
 

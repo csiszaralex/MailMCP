@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { CimdResolver } from './auth/cimd.js';
@@ -18,7 +17,7 @@ import { ImapMailProvider } from './mail/imap-provider.js';
 import { ImapMailWriter } from './mail/imap-writer.js';
 import type { ToolDeps } from './server.js';
 import { tlsSmtpSender } from './smtp/sender.js';
-import { Store } from './store/store.js';
+import { Store, storePath } from './store/store.js';
 
 /** How long shutdown waits for open requests and IMAP logouts before it exits anyway. */
 const SHUTDOWN_GRACE_MS = 5_000;
@@ -36,7 +35,7 @@ try {
   // (which prints mail content, D25) only starts with loopback addresses.
   runtime = loadRuntime(process.env);
   config = loadConfig(await readFile(accountsFile, 'utf8'), process.env);
-  store = Store.open(join(runtime.dataDir, 'mailmcp.sqlite'));
+  store = Store.open(storePath(runtime.dataDir));
 } catch (err) {
   const message = err instanceof Error ? err.message : 'unknown error';
   process.stderr.write(`mailmcp: cannot start: ${message}\n`);
@@ -62,14 +61,14 @@ const deps: ToolDeps = {
 };
 
 const tokens = new TokenService(store, Date.now, stderrAuthLogger);
+// One map for both: the flow accepts exactly the resources the app serves.
+const resources = resourceUrls(
+  runtime.publicUrl,
+  config.accounts.map((a) => a.id),
+);
 const flow = new AuthorizationFlow({
   publicUrl: runtime.publicUrl,
-  resources: new Set(
-    resourceUrls(
-      runtime.publicUrl,
-      config.accounts.map((a) => a.id),
-    ).values(),
-  ),
+  resources: new Set(resources.values()),
   cimd: new CimdResolver(fetch, Date.now),
   tokens,
   limiter: new LoginLimiter(store, Date.now),
@@ -81,6 +80,7 @@ const flow = new AuthorizationFlow({
 });
 const app = createApp(config.accounts, deps, {
   publicUrl: runtime.publicUrl,
+  resources,
   oauth: {
     flow,
     tokens,

@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import { parseJsonText } from '../boundary.js';
+import { isLoopbackHost } from '../config/runtime.js';
 import type { Clock } from './tokens.js';
 
 /** D10: client_id metadata documents are fetched only from these origins (also rules out SSRF). */
@@ -21,7 +22,6 @@ const TOO_MANY_FETCHES = 'Too many client metadata requests, try again.';
 export interface ClientMetadata {
   clientId: string;
   redirectUris: string[];
-  clientName: string | undefined;
 }
 
 /** The message is safe to show on the error page: it names at most the client host, never the body. */
@@ -40,7 +40,6 @@ const metadataSchema = z.object({
   client_id: z.string(),
   redirect_uris: z.array(z.string()).min(1),
   token_endpoint_auth_method: z.literal('none'),
-  client_name: z.string().optional(),
 });
 
 function isAllowedOrigin(origin: string): boolean {
@@ -181,22 +180,15 @@ export class CimdResolver {
     }
     const parsed = metadataSchema.safeParse(raw);
     if (!parsed.success || parsed.data.client_id !== clientId) throw invalid;
-    return {
-      clientId,
-      redirectUris: parsed.data.redirect_uris,
-      clientName: parsed.data.client_name,
-    };
+    return { clientId, redirectUris: parsed.data.redirect_uris };
   }
 }
-
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** A registered http loopback URI without a port: the client picks the port at runtime. */
 function portlessLoopback(uri: string): URL | undefined {
   if (!URL.canParse(uri)) return undefined;
   const url = new URL(uri);
-  const loopback =
-    url.protocol === 'http:' && LOOPBACK_HOSTNAMES.has(url.hostname) && url.port === '';
+  const loopback = url.protocol === 'http:' && isLoopbackHost(url.hostname) && url.port === '';
   return loopback ? url : undefined;
 }
 

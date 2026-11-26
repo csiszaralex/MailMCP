@@ -73,7 +73,6 @@ describe('CimdResolver', () => {
     await expect(resolver.resolve(CLAUDE_CODE_ID)).resolves.toEqual({
       clientId: CLAUDE_CODE_ID,
       redirectUris: CLAUDE_CODE_URIS,
-      clientName: 'Claude Code',
     });
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const [url, init] = fetchFn.mock.calls[0] ?? [];

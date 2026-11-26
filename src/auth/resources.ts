@@ -4,7 +4,12 @@ import type { OAuthMetadata } from '@modelcontextprotocol/server';
 export const SUPPORTED_SCOPES = ['offline_access'] as const;
 
 /** The MCP endpoint that reaches every account. */
-const AGGREGATE_PATH = '/mcp';
+export const MCP_PATH = '/mcp';
+
+/** The MCP endpoint of one account. */
+export function accountMcpPath(accountId: string): string {
+  return `${MCP_PATH}/${accountId}`;
+}
 
 /** The OAuth endpoints, as the metadata names them and the routes serve them. */
 export const AUTHORIZE_PATH = '/authorize';
@@ -15,7 +20,7 @@ export const TOKEN_PATH = '/token';
  * configured public origin, never from a request URL.
  */
 export function resourceUrls(publicUrl: URL, accountIds: readonly string[]): Map<string, string> {
-  const paths = [AGGREGATE_PATH, ...accountIds.map((id) => `${AGGREGATE_PATH}/${id}`)];
+  const paths = [MCP_PATH, ...accountIds.map(accountMcpPath)];
   return new Map(paths.map((path) => [path, `${publicUrl.origin}${path}`]));
 }
 

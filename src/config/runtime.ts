@@ -1,6 +1,7 @@
 import { base32Decode } from '../auth/totp.js';
 import { parsePasswordHash, type PasswordHash } from '../auth/password.js';
 import { MailError } from '../errors.js';
+import { DEFAULT_DATA_DIR } from '../store/store.js';
 import { parseDebug, parsePort } from './load.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -19,14 +20,14 @@ export interface RuntimeConfig {
   totpSecret: Buffer;
 }
 
-/** `new URL('http://[::1]:8787').hostname` keeps the brackets, so both spellings count. */
+/**
+ * The loopback host names. `new URL('http://[::1]:8787').hostname` keeps the brackets, while
+ * MAILMCP_HOST is written without them, so both spellings count.
+ */
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
 export function isLoopbackHost(hostname: string): boolean {
-  return (
-    hostname === '127.0.0.1' ||
-    hostname === 'localhost' ||
-    hostname === '::1' ||
-    hostname === '[::1]'
-  );
+  return LOOPBACK_HOSTNAMES.has(hostname);
 }
 
 function invalid(message: string): MailError {
@@ -114,7 +115,7 @@ export function loadRuntime(env: Env): RuntimeConfig {
   const publicUrl = parsePublicUrl(required(env, 'MAILMCP_PUBLIC_URL'));
   const host = read(env, 'MAILMCP_HOST') ?? '127.0.0.1';
   const port = parsePort(read(env, 'MAILMCP_PORT'));
-  const dataDir = read(env, 'MAILMCP_DATA_DIR') ?? './data';
+  const dataDir = read(env, 'MAILMCP_DATA_DIR') ?? DEFAULT_DATA_DIR;
   const behindProxy = parseBehindProxy(read(env, 'MAILMCP_BEHIND_PROXY'));
   const debug = parseDebug(read(env, 'MAILMCP_DEBUG'));
   const passwordHash = parseHash(required(env, 'MAILMCP_ADMIN_PASSWORD_HASH'));

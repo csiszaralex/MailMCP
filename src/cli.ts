@@ -1,10 +1,9 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hashPassword } from './auth/password.js';
 import { clientHost } from './auth/tokens.js';
 import { base32Encode, newTotpSecret, otpauthUri } from './auth/totp.js';
-import { Store } from './store/store.js';
+import { DEFAULT_DATA_DIR, Store, storePath } from './store/store.js';
 
 /** D36: the operator commands. Everything the commands touch comes through this object. */
 export interface CliIo {
@@ -74,8 +73,8 @@ function totpSetupCommand(account: string, io: CliIo): number {
  */
 function withStore(io: CliIo, run: (store: Store) => number): number {
   const configured = io.env.MAILMCP_DATA_DIR;
-  const dataDir = configured === undefined || configured === '' ? './data' : configured;
-  const path = join(dataDir, 'mailmcp.sqlite');
+  const dataDir = configured === undefined || configured === '' ? DEFAULT_DATA_DIR : configured;
+  const path = storePath(dataDir);
   if (!existsSync(path)) {
     io.stderr(`No database at ${path}. Is MAILMCP_DATA_DIR right?\n`);
     return EXIT_FAILURE;

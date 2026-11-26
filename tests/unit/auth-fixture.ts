@@ -102,6 +102,7 @@ export function createTestApp(publicUrl: URL = PUBLIC_URL): TestApp {
   });
   const app = createApp(ACCOUNTS, deps, {
     publicUrl,
+    resources,
     oauth: { flow, tokens, behindProxy: false, remoteAddress: () => CLIENT_IP },
     logError: (record) => {
       httpErrors.push(record);

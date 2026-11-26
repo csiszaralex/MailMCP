@@ -7,7 +7,7 @@ import {
   originValidationResponse,
   requireBearerAuth,
 } from '@modelcontextprotocol/server';
-import { resourceUrls, TOKEN_PATH } from '../auth/resources.js';
+import { accountMcpPath, MCP_PATH, TOKEN_PATH } from '../auth/resources.js';
 import type { Account } from '../config/types.js';
 import { errorClass, type HttpErrorLogger } from '../log.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
@@ -30,6 +30,11 @@ export const MAX_REQUEST_BODY_BYTES =
 export interface AppOptions {
   /** MAILMCP_PUBLIC_URL: the only accepted Host and Origin, and the base of every resource. */
   publicUrl: URL;
+  /**
+   * resourceUrls(publicUrl, the account ids): every MCP endpoint path and its resource. main.ts
+   * hands the same map's values to the AuthorizationFlow, so both know one set of resources.
+   */
+  resources: ReadonlyMap<string, string>;
   oauth: Omit<OAuthRouteDeps, 'publicUrl' | 'resources'>;
   /** Gets the class of every error no route handled. */
   logError: HttpErrorLogger;
@@ -67,20 +72,16 @@ function isPublicMetadata(method: string, path: string): boolean {
  * refused on /mcp and /mcp/b. A 401 points to that endpoint's protected resource metadata.
  */
 export function createApp(accounts: readonly Account[], deps: ToolDeps, options: AppOptions): Hono {
-  const { publicUrl } = options;
-  const resources = resourceUrls(
-    publicUrl,
-    accounts.map((a) => a.id),
-  );
+  const { publicUrl, resources } = options;
   const handlers = new Map<string, McpHandler>([
     [
-      '/mcp',
+      MCP_PATH,
       createMcpHandler(() => buildMcpServer({ accounts, scopedAccountId: undefined }, deps), {
         maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
       }),
     ],
     ...accounts.map((account): [string, McpHandler] => [
-      `/mcp/${account.id}`,
+      accountMcpPath(account.id),
       createMcpHandler(
         () => buildMcpServer({ accounts: [account], scopedAccountId: account.id }, deps),
         { maxRequestBodySize: MAX_REQUEST_BODY_BYTES },
@@ -123,10 +124,10 @@ export function createApp(accounts: readonly Account[], deps: ToolDeps, options:
     return undefined;
   });
   registerOAuthRoutes(app, { publicUrl, resources, ...options.oauth });
-  app.all('/mcp', (c) => endpoints.get('/mcp')?.(c.req.raw) ?? c.notFound());
+  app.all(MCP_PATH, (c) => endpoints.get(MCP_PATH)?.(c.req.raw) ?? c.notFound());
   // An unknown account answers 404 before the token is looked at.
-  app.all('/mcp/:accountId', (c) => {
-    const serve = endpoints.get(`/mcp/${c.req.param('accountId')}`);
+  app.all(`${MCP_PATH}/:accountId`, (c) => {
+    const serve = endpoints.get(accountMcpPath(c.req.param('accountId')));
     return serve === undefined ? c.notFound() : serve(c.req.raw);
   });
   app.notFound((c) => c.text('Not found', 404));
