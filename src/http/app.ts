@@ -10,7 +10,12 @@ import { resourceUrls } from '../auth/resources.js';
 import type { Account } from '../config/types.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
 import { buildMcpServer, type ToolDeps } from '../server.js';
-import { registerOAuthRoutes, type OAuthRouteDeps } from './oauth-routes.js';
+import {
+  AUTHORIZATION_SERVER_METADATA_PATH,
+  PROTECTED_RESOURCE_METADATA_PREFIX,
+  registerOAuthRoutes,
+  type OAuthRouteDeps,
+} from './oauth-routes.js';
 
 /**
  * Request body limit (D14): the attachments as base64 (4/3 of their bytes) plus 2 MiB for the rest of the JSON.
@@ -37,9 +42,22 @@ function foreignOrigin(origin: string | undefined, allowed: string): Response | 
 }
 
 /**
+ * GET and HEAD of the OAuth metadata documents skip the Origin check on purpose: they are public,
+ * carry Access-Control-Allow-Origin: *, and a client's backend or a browser-based client may send
+ * its own Origin. The Host check still applies to them.
+ */
+function isPublicMetadata(method: string, path: string): boolean {
+  return (
+    (method === 'GET' || method === 'HEAD') &&
+    (path === AUTHORIZATION_SERVER_METADATA_PATH ||
+      path.startsWith(`${PROTECTED_RESOURCE_METADATA_PREFIX}/`))
+  );
+}
+
+/**
  * The MCP endpoints and the OAuth routes (D30, D33). Every request's Host must carry the public
  * URL's hostname (DNS rebinding) and an Origin, when present, must be the public origin, or the
- * answer is 403. Each MCP endpoint
+ * answer is 403; only the metadata documents accept any Origin (isPublicMetadata). Each MCP endpoint
  * accepts only a Bearer token issued for its own resource identifier, so a token for /mcp/a is
  * refused on /mcp and /mcp/b. A 401 points to that endpoint's protected resource metadata.
  */
@@ -91,8 +109,10 @@ export function createApp(accounts: readonly Account[], deps: ToolDeps, options:
   app.use('*', async (c, next) => {
     const rejected =
       hostHeaderValidationResponse(c.req.raw, allowedHostnames) ??
-      originValidationResponse(c.req.raw, allowedHostnames) ??
-      foreignOrigin(c.req.header('origin'), publicUrl.origin);
+      (isPublicMetadata(c.req.method, c.req.path)
+        ? undefined
+        : (originValidationResponse(c.req.raw, allowedHostnames) ??
+          foreignOrigin(c.req.header('origin'), publicUrl.origin)));
     if (rejected !== undefined) return rejected;
     await next();
     return undefined;

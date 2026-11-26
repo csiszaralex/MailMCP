@@ -32,7 +32,8 @@ export interface OAuthRouteDeps {
 /** Both form endpoints take a few short fields; 16 KiB is far above any honest request. */
 const MAX_FORM_BYTES = 16 * 1024;
 const FORM_TYPE = 'application/x-www-form-urlencoded';
-const PROTECTED_RESOURCE_PREFIX = '/.well-known/oauth-protected-resource';
+export const AUTHORIZATION_SERVER_METADATA_PATH = '/.well-known/oauth-authorization-server';
+export const PROTECTED_RESOURCE_METADATA_PREFIX = '/.well-known/oauth-protected-resource';
 const METADATA_HEADERS: Readonly<Record<string, string>> = { 'Access-Control-Allow-Origin': '*' };
 /** RFC 6749 5.1: token responses must not be cached. */
 const TOKEN_HEADERS: Readonly<Record<string, string>> = {
@@ -167,14 +168,16 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
         });
 
   // Hono answers HEAD with the GET handler, so the catch-all after it sees every other method.
-  app.get('/.well-known/oauth-authorization-server', () => metadata(asBody));
-  app.all('/.well-known/oauth-authorization-server', () => methodNotAllowed('GET, HEAD'));
-  app.get(`${PROTECTED_RESOURCE_PREFIX}/mcp`, () => metadata(prBodies.get('/mcp')));
-  app.all(`${PROTECTED_RESOURCE_PREFIX}/mcp`, () => methodNotAllowed('GET, HEAD'));
-  app.get(`${PROTECTED_RESOURCE_PREFIX}/mcp/:accountId`, (c) =>
+  app.get(AUTHORIZATION_SERVER_METADATA_PATH, () => metadata(asBody));
+  app.all(AUTHORIZATION_SERVER_METADATA_PATH, () => methodNotAllowed('GET, HEAD'));
+  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp`, () => metadata(prBodies.get('/mcp')));
+  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp`, () => methodNotAllowed('GET, HEAD'));
+  app.get(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp/:accountId`, (c) =>
     metadata(prBodies.get(`/mcp/${c.req.param('accountId')}`)),
   );
-  app.all(`${PROTECTED_RESOURCE_PREFIX}/mcp/:accountId`, () => methodNotAllowed('GET, HEAD'));
+  app.all(`${PROTECTED_RESOURCE_METADATA_PREFIX}/mcp/:accountId`, () =>
+    methodNotAllowed('GET, HEAD'),
+  );
 
   const ipOf = (c: Context): string =>
     clientIp(c.req.header('x-forwarded-for'), deps.remoteAddress(c), deps.behindProxy);

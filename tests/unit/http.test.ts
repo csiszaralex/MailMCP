@@ -110,6 +110,38 @@ describe('HTTP app', () => {
     expect(response.status).toBe(403);
   });
 
+  it('serves the metadata to a foreign Origin while /mcp still refuses it', async () => {
+    const test = setup();
+    const origin = { origin: 'https://client.example' };
+    for (const path of [
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource/mcp',
+      '/.well-known/oauth-protected-resource/mcp/a',
+    ]) {
+      for (const method of ['GET', 'HEAD']) {
+        const response = await test.fetch(`${ORIGIN}${path}`, { method, headers: origin });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('access-control-allow-origin')).toBe('*');
+      }
+    }
+    const token = accessTokenFor(test.tokens, resource('/mcp'));
+    expect((await post(test, '/mcp', token, origin)).status).toBe(403);
+    const form = await test.fetch(`${ORIGIN}/token`, {
+      method: 'POST',
+      headers: origin,
+      body: new URLSearchParams({ grant_type: 'refresh_token' }),
+    });
+    expect(form.status).toBe(403);
+  });
+
+  it('checks the Host of a metadata request too', async () => {
+    const test = setup();
+    const response = await test.app.request(`${ORIGIN}/.well-known/oauth-authorization-server`, {
+      headers: { host: 'evil.example' },
+    });
+    expect(response.status).toBe(403);
+  });
+
   it('rejects an Origin with our hostname but another port or scheme (D30)', async () => {
     const test = setup();
     const token = accessTokenFor(test.tokens, resource('/mcp'));
