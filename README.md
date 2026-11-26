@@ -2,7 +2,7 @@
 
 Távoli MCP szerver, amelyen keresztül a Claude egyszerre több postafiókot kezel: Gmailt, Google Workspace-t és bármilyen IMAP/SMTP fiókot. A képességei a Claude beépített Gmail connectoráét követik (keresés, olvasás, mellékletek, piszkozatok, címkék, kuka, küldés), csak nem egy, hanem tetszőleges számú fiókra.
 
-> **Állapot:** 3. fázis kész: OAuth bejelentkezés (jelszó és TOTP), lokálisan is kötelező. A nyilvános telepítés (Docker, reverse proxy) a 4. fázisban jön.
+> **Állapot:** 4. fázis: a szerver Docker image-ként készül a CI-ben, és reverse proxy mögött fut. A claude.ai connector átvétele folyamatban.
 
 ## Mire jó
 
@@ -63,11 +63,21 @@ A belépések listája: `pnpm cli tokens list`. Egy belépés visszavonása: `pn
 
 `MAILMCP_DEBUG=1` bekapcsolja az IMAP és SMTP protokoll naplóját a stderr-en (a jelszót az imapflow és a nodemailer is kitakarja). A napló a levéltartalmat is kiírja, ezért csak lokális hibakereséshez való: a szerver csak akkor indul el vele, ha a `MAILMCP_PUBLIC_URL` és a `MAILMCP_HOST` is loopback cím. Az induló sor jelzi, hogy be van kapcsolva. Alapértelmezés: `0`.
 
-Fejlesztéshez: `pnpm test` (Docker kell a GreenMail integrációs tesztekhez), `pnpm test:unit` (Docker nélkül).
+Fejlesztéshez: `pnpm test` (Docker kell a GreenMail integrációs tesztekhez), `pnpm test:unit` (Docker nélkül), `pnpm format:check`.
+
+## Konténer
+
+A CI a main ág minden commitjából image-et épít: `ghcr.io/csiszaralex/mailmcp`, `:latest` és `:sha-<commit>` címkével. Lokálisan: `docker build -t mailmcp .`
+
+- A beállítások ugyanazok a környezeti változók, mint lokálisan (a spec „Beállítások” táblája és a `.env.example`). Az image alapértékei: `MAILMCP_HOST=0.0.0.0`, `MAILMCP_DATA_DIR=/data`, `MAILMCP_ACCOUNTS_FILE=/config/accounts.yaml`. A `MAILMCP_PUBLIC_URL` a reverse proxy nyilvános `https://` címe, reverse proxy mögött `MAILMCP_BEHIND_PROXY=1` kell.
+- Kötetek: a `/data` named volume (a SQLite adatbázis), az `accounts.yaml` csak olvashatóan a `/config/accounts.yaml` helyre.
+- A konténer nem root felhasználóval fut, és csak olvasható fájlrendszerrel is működik (`read_only`, tmpfs a `/tmp`-re).
+- A healthcheck az image része: `node dist/cli.js health`.
+- A CLI a konténerben: `docker compose exec <szolgáltatás> node dist/cli.js tokens list`. A `hash-password` és a `totp-setup` lokálisan is futtatható (`pnpm cli`), az eredmény ugyanaz. Compose env fájlban az argon2 hash `$` jeleit `$$`-ra kell cserélni.
 
 ## Hogyan működik
 
-- Egyetlen Node folyamat Docker konténerben, Streamable HTTP transzporttal.
+- Egyetlen Node folyamat Docker konténerben, reverse proxy mögött, Streamable HTTP transzporttal.
 - Minden fiók IMAP-on és SMTP-n érhető el, fiókonkénti alkalmazásjelszóval. Gmailnél a szerver a Gmail saját IMAP kiterjesztéseit használja, ezért a keresés a megszokott Gmail szintaxissal megy (`from:`, `has:attachment`, `newer_than:7d`).
 - A szerver nem tárol és nem indexel levelet.
 - A Claude kliensek OAuth-tal lépnek be (PKCE, Client ID Metadata Document, erőforráshoz kötött tokenek).
