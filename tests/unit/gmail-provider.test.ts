@@ -98,10 +98,17 @@ describe('ImapMailProvider on Gmail', () => {
     await provider.search('from:bob in:trash subject:"in:spam talk"', 0, 20);
     await provider.search('IN:SPAM', 0, 20);
     await provider.search('in:trashcan constructor', 0, 20);
+    // The in: aliases of the trash and spam select them too, as on other accounts.
+    await provider.search('in:bin hello', 0, 20);
+    await provider.search('in:junk', 0, 20);
+    await provider.search('in:constructor', 0, 20);
     expect(fake.searches).toEqual([
       { mailbox: TRASH, query: { gmraw: 'from:bob subject:"in:spam talk"' } },
       { mailbox: SPAM, query: { all: true } },
       { mailbox: ALL_MAIL, query: { gmraw: 'in:trashcan constructor' } },
+      { mailbox: TRASH, query: { gmraw: 'hello' } },
+      { mailbox: SPAM, query: { all: true } },
+      { mailbox: ALL_MAIL, query: { gmraw: 'in:constructor' } },
     ]);
   });
 
