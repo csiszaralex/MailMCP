@@ -66,9 +66,13 @@ describe('loadRuntime', () => {
     expect(
       loadRuntime({ ...BASE, MAILMCP_PUBLIC_URL: 'http://localhost:8787' }).publicUrl.origin,
     ).toBe('http://localhost:8787');
-    expect(loadRuntime({ ...BASE, MAILMCP_PUBLIC_URL: 'http://[::1]:8787' }).publicUrl.origin).toBe(
-      'http://[::1]:8787',
+    // The SDK refuses an http issuer on [::1], so the start-up must refuse it first.
+    expect(failure({ ...BASE, MAILMCP_PUBLIC_URL: 'http://[::1]:8787' }).message).toContain(
+      'MAILMCP_PUBLIC_URL',
     );
+    expect(
+      loadRuntime({ ...BASE, MAILMCP_PUBLIC_URL: 'https://[::1]:8787' }).publicUrl.origin,
+    ).toBe('https://[::1]:8787');
   });
 
   it('rejects other schemes and unparsable urls', () => {

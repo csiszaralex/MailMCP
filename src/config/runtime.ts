@@ -45,6 +45,13 @@ function required(env: Env, name: string): string {
   return value;
 }
 
+/**
+ * The hosts on which the public URL may use http (D30). Narrower than isLoopbackHost: the MCP SDK's
+ * buildOAuthProtectedResourceMetadata accepts an http issuer only on localhost and 127.0.0.1, so
+ * http://[::1] would pass here and then stop the start-up.
+ */
+const HTTP_PUBLIC_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost']);
+
 /** The errors never quote the value: a URL with credentials would print a password. */
 function parsePublicUrl(text: string): URL {
   let url: URL;
@@ -53,9 +60,11 @@ function parsePublicUrl(text: string): URL {
   } catch {
     throw invalid('MAILMCP_PUBLIC_URL must be an absolute URL.');
   }
-  const allowedScheme = isLoopbackHost(url.hostname) ? ['http:', 'https:'] : ['https:'];
+  const allowedScheme = HTTP_PUBLIC_HOSTS.has(url.hostname) ? ['http:', 'https:'] : ['https:'];
   if (!allowedScheme.includes(url.protocol)) {
-    throw invalid('MAILMCP_PUBLIC_URL must use https (http is allowed only for a loopback host).');
+    throw invalid(
+      'MAILMCP_PUBLIC_URL must use https (http is allowed only for 127.0.0.1 and localhost).',
+    );
   }
   if (
     url.pathname !== '/' ||
