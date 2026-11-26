@@ -18,7 +18,9 @@ import {
   accountMcpPath,
   AUTHORIZE_PATH,
   authorizationServerMetadata,
+  AUTHORIZATION_SERVER_METADATA_PATH,
   MCP_PATH,
+  PROTECTED_RESOURCE_METADATA_PREFIX,
   SUPPORTED_SCOPES,
   TOKEN_PATH,
 } from '../auth/resources.js';
@@ -39,8 +41,6 @@ export interface OAuthRouteDeps {
 /** Both form endpoints take a few short fields; 16 KiB is far above any honest request. */
 const MAX_FORM_BYTES = 16 * 1024;
 const FORM_TYPE = 'application/x-www-form-urlencoded';
-export const AUTHORIZATION_SERVER_METADATA_PATH = '/.well-known/oauth-authorization-server';
-export const PROTECTED_RESOURCE_METADATA_PREFIX = '/.well-known/oauth-protected-resource';
 const METADATA_HEADERS: Readonly<Record<string, string>> = { 'Access-Control-Allow-Origin': '*' };
 /** RFC 6749 5.1: token responses must not be cached. */
 const TOKEN_HEADERS: Readonly<Record<string, string>> = {
