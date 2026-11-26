@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CimdResolver } from '../../src/auth/cimd.js';
 import {
   AuthorizationFlow,
-  MAX_PENDING_REQUESTS,
+  type AuthorizationFlowDeps,
+  MAX_STATE_BYTES,
   type AuthorizeParams,
   type CompleteResult,
   type RedeemParams,
@@ -64,6 +65,8 @@ afterEach(() => {
 
 interface Setup {
   flow: AuthorizationFlow;
+  /** The deps of flow, for a second instance (a restarted server). */
+  deps: AuthorizationFlowDeps;
   tokens: TokenService;
   records: AuthEventRecord[];
   now: () => number;
@@ -95,7 +98,7 @@ function setup(): Setup {
     );
   };
   const tokens = new TokenService(store, clock, log);
-  const flow = new AuthorizationFlow({
+  const deps: AuthorizationFlowDeps = {
     publicUrl: PUBLIC_URL,
     resources: new Set(resourceUrls(PUBLIC_URL, ['work']).values()),
     cimd: new CimdResolver(fetchFn, clock),
@@ -106,9 +109,10 @@ function setup(): Setup {
     totpSecret: TOTP_SECRET,
     clock,
     log,
-  });
+  };
   return {
-    flow,
+    flow: new AuthorizationFlow(deps),
+    deps,
     tokens,
     records,
     now: clock,
@@ -205,7 +209,7 @@ describe('AuthorizationFlow start', () => {
     const started = await s.flow.start(authorizeParams());
     expect(started).toEqual({
       kind: 'login',
-      requestId: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/) as string,
+      requestId: expect.stringMatching(/^[A-Za-z0-9_-]+$/) as string,
       view: {
         clientHost: 'claude.ai',
         redirectHost: '127.0.0.1:53124',
@@ -306,6 +310,21 @@ describe('AuthorizationFlow start', () => {
     }
   });
 
+  it('redirects with invalid_request for a state over 1 KiB and accepts exactly 1 KiB', async () => {
+    const s = setup();
+    // 'é' is two UTF-8 bytes: the cap counts bytes, not characters.
+    for (const state of ['s'.repeat(MAX_STATE_BYTES + 1), 'é'.repeat(MAX_STATE_BYTES / 2 + 1)]) {
+      const url = expectRedirect(await s.flow.start(authorizeParams({ state })));
+      expect(url.searchParams.get('error')).toBe('invalid_request');
+    }
+    expect(s.records.at(-1)).toMatchObject({
+      event: 'authorize_rejected',
+      reason: 'state too long',
+    });
+    const ok = await s.flow.start(authorizeParams({ state: 'é'.repeat(MAX_STATE_BYTES / 2) }));
+    expect(ok.kind).toBe('login');
+  });
+
   it('leaves out state when none was given and keeps the redirect_uri query', async () => {
     const s = setup();
     const result = await s.flow.start(
@@ -379,17 +398,54 @@ describe('AuthorizationFlow complete', () => {
     );
   });
 
-  it('drops the oldest pending request beyond the cap and keeps the newest', async () => {
+  it('shows an error page for a tampered request field', async () => {
+    const s = setup();
+    const requestId = await startLogin(s);
+    const bytes = Buffer.from(requestId, 'base64url');
+    for (const at of [0, 20, bytes.length - 1]) {
+      const tampered = Buffer.from(bytes);
+      tampered[at] = (tampered[at] ?? 0) ^ 1;
+      const result = s.flow.complete({
+        requestId: tampered.toString('base64url'),
+        password: PASSWORD,
+        totp: rightCode(s.now()),
+        ip: IP,
+      });
+      expect(expectErrorPage(result)).toMatch(/unknown or expired/);
+    }
+    for (const garbage of ['', 'x', requestId.slice(0, 30)]) {
+      expectErrorPage(
+        s.flow.complete({ requestId: garbage, password: PASSWORD, totp: '123456', ip: IP }),
+      );
+    }
+    // None of the failed attempts spent the real request.
+    expectRedirect(
+      s.flow.complete({ requestId, password: PASSWORD, totp: rightCode(s.now()), ip: IP }),
+    );
+  });
+
+  it('shows an error page for a request sealed by another flow instance (a restart)', async () => {
+    const s = setup();
+    const requestId = await startLogin(s);
+    const restarted = new AuthorizationFlow(s.deps);
+    expectErrorPage(
+      restarted.complete({ requestId, password: PASSWORD, totp: rightCode(s.now()), ip: IP }),
+    );
+  });
+
+  it('keeps no state per opened login page', async () => {
     const s = setup();
     const first = await startLogin(s);
-    for (let i = 1; i < MAX_PENDING_REQUESTS; i += 1) await startLogin(s);
-    const last = await startLogin(s);
-    expectErrorPage(
+    for (let i = 0; i < 50; i += 1) await startLogin(s);
+    expectRedirect(
       s.flow.complete({ requestId: first, password: PASSWORD, totp: rightCode(s.now()), ip: IP }),
     );
-    expectRedirect(
-      s.flow.complete({ requestId: last, password: PASSWORD, totp: rightCode(s.now()), ip: IP }),
-    );
+  });
+
+  it('keeps the sealed request well under the 16 KiB form limit at the longest state', async () => {
+    const s = setup();
+    const requestId = await startLogin(s, { state: 's'.repeat(MAX_STATE_BYTES) });
+    expect(requestId.length).toBeLessThan(4096);
   });
 
   it('keeps a request that is not yet expired', async () => {

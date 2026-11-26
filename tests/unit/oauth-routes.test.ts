@@ -122,7 +122,7 @@ async function json(res: Response): Promise<ReturnType<typeof parseJsonText>> {
   return parseJsonText(await res.text());
 }
 
-/** Opens a login page and returns the pending request id from its hidden field. */
+/** Opens a login page and returns the sealed pending request from its hidden field. */
 async function startLogin(app: Hono): Promise<string> {
   const res = await app.request(authorizeUrl());
   expect(res.status).toBe(200);

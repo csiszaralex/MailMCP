@@ -185,7 +185,8 @@ export function registerOAuthRoutes(app: Hono, deps: OAuthRouteDeps): void {
     '/authorize',
     bodyLimit({ maxSize: MAX_FORM_BYTES, onError: () => errorPage(TOO_LARGE, 413) }),
     async (c) => {
-      // The unguessable request id and this check together stand in for a CSRF token (D31).
+      // The sealed request (only this server can make one) and this check together stand in for
+      // a CSRF token (D31).
       if (c.req.header('origin') !== deps.publicUrl.origin) return errorPage(FOREIGN_ORIGIN, 403);
       if (!isForm(c)) return errorPage(NOT_A_FORM, 400);
       const form = await formFields(c);

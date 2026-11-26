@@ -1,4 +1,12 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
+import * as z from 'zod';
+import { parseJsonText } from '../boundary.js';
 import { isLoopbackHost } from '../config/runtime.js';
 import type { AuthEventRecord, AuthLogger } from '../log.js';
 import type { Store } from '../store/store.js';
@@ -22,14 +30,15 @@ export const PENDING_REQUEST_TTL_MS = 10 * 60_000;
 export const AUTHORIZATION_CODE_TTL_MS = 60_000;
 
 /**
- * Anyone can open pending requests with a valid Claude client_id, so their number is capped; the
- * oldest is dropped first (Map keeps insertion order). A request is at most a URL of about 16 KB,
- * so the cap bounds the memory to some 8 MB. Dropping instead of refusing means a flood cannot lock
- * the owner out: a fresh sign-in always gets in.
+ * The longest state parameter accepted, in UTF-8 bytes. state is client input that travels sealed
+ * in the login form, so the cap keeps that field well under the 16 KiB form body limit.
  */
-export const MAX_PENDING_REQUESTS = 500;
+export const MAX_STATE_BYTES = 1024;
 
-const REQUEST_ID_BYTES = 16;
+/** AES-256-GCM: 32 byte key, 12 byte nonce, 16 byte tag. */
+const SEAL_KEY_BYTES = 32;
+const SEAL_IV_BYTES = 12;
+const SEAL_TAG_BYTES = 16;
 const CODE_BYTES = 32;
 /** RFC 7636: the S256 challenge is base64url(sha256) without padding, always 43 characters. */
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -55,6 +64,7 @@ export interface AuthorizeParams {
   state?: string;
 }
 
+/** requestId is the sealed pending request (D31): opaque to the browser, it carries the binding. */
 export type StartResult =
   | { kind: 'login'; requestId: string; view: LoginView }
   | { kind: 'error_page'; message: string }
@@ -89,9 +99,19 @@ interface Binding {
   state: string | undefined;
 }
 
+/** What the login form's hidden request field carries, sealed (D31). */
+const pendingSchema = z.object({
+  clientId: z.string(),
+  redirectUri: z.string(),
+  codeChallenge: z.string(),
+  resource: z.string(),
+  scope: z.string(),
+  state: z.string().optional(),
+  expiresAt: z.number(),
+});
+
 interface PendingRequest {
   binding: Binding;
-  view: LoginView;
   expiresAt: number;
 }
 
@@ -132,6 +152,19 @@ function withParams(redirectUri: string, params: Record<string, string | undefin
   return url.href;
 }
 
+/** What the login page shows; recomputed from the binding, so the form need not carry it. */
+function viewFor(binding: Binding): LoginView {
+  const redirect = new URL(binding.redirectUri);
+  return {
+    clientHost: new URL(binding.clientId).host,
+    redirectHost: redirect.host,
+    redirectOrigin: redirect.origin,
+    resource: binding.resource,
+    loopbackRedirect: isLoopbackHost(redirect.hostname),
+    error: undefined,
+  };
+}
+
 function pkceMatches(verifier: string, challenge: string): boolean {
   const computed = Buffer.from(createHash('sha256').update(verifier).digest('base64url'));
   const expected = Buffer.from(challenge);
@@ -142,9 +175,18 @@ function pkceMatches(verifier: string, challenge: string): boolean {
 export class AuthorizationFlow {
   private readonly deps: AuthorizationFlowDeps;
   private readonly issuer: string;
-  /** Pending requests and codes live in memory only; a restart drops them. */
-  private readonly pending = new Map<string, PendingRequest>();
-  /** Redeemed codes stay until their expiry, so a second redemption is detected. */
+  /**
+   * Seals the pending requests the login form carries (D31). It is random per instance and never
+   * stored, so a restart invalidates every pending request, and nothing is kept per GET /authorize.
+   */
+  private readonly sealKey = randomBytes(SEAL_KEY_BYTES);
+  /**
+   * Nonces of the sealed requests that already produced a code, until the request would expire,
+   * so a request signs in once. Only a right password and TOTP code add an entry, so a stranger
+   * cannot grow it.
+   */
+  private readonly spent = new Map<string, number>();
+  /** Codes live in memory only; a restart drops them. Redeemed codes stay until their expiry. */
   private readonly codes = new Map<string, IssuedCode>();
 
   constructor(deps: AuthorizationFlowDeps) {
@@ -200,6 +242,13 @@ export class AuthorizationFlow {
         'response_type unsupported',
       );
     }
+    if (params.state !== undefined && Buffer.byteLength(params.state) > MAX_STATE_BYTES) {
+      return fail(
+        'invalid_request',
+        `The state parameter is longer than ${String(MAX_STATE_BYTES)} bytes.`,
+        'state too long',
+      );
+    }
     const challenge = params.code_challenge;
     if (
       challenge === undefined ||
@@ -220,34 +269,19 @@ export class AuthorizationFlow {
       return fail('invalid_target', 'The resource is not served here.', 'resource unknown');
     }
 
-    const redirect = new URL(redirectUri);
-    const view: LoginView = {
-      clientHost: new URL(clientId).host,
-      redirectHost: redirect.host,
-      redirectOrigin: redirect.origin,
+    const binding: Binding = {
+      clientId,
+      redirectUri,
+      codeChallenge: challenge,
       resource,
-      loopbackRedirect: isLoopbackHost(redirect.hostname),
-      error: undefined,
+      scope: supportedScope(params.scope),
+      state: params.state,
     };
-    const requestId = randomBytes(REQUEST_ID_BYTES).toString('base64url');
-    while (this.pending.size >= MAX_PENDING_REQUESTS) {
-      const oldest = this.pending.keys().next();
-      if (oldest.done === true) break;
-      this.pending.delete(oldest.value);
-    }
-    this.pending.set(requestId, {
-      binding: {
-        clientId,
-        redirectUri,
-        codeChallenge: challenge,
-        resource,
-        scope: supportedScope(params.scope),
-        state: params.state,
-      },
-      view,
+    const requestId = this.seal({
+      binding,
       expiresAt: this.deps.clock() + PENDING_REQUEST_TTL_MS,
     });
-    return { kind: 'login', requestId, view };
+    return { kind: 'login', requestId, view: viewFor(binding) };
   }
 
   /** POST /authorize: checks the limiter, then the password (always) and the TOTP code. */
@@ -258,8 +292,9 @@ export class AuthorizationFlow {
     ip: string;
   }): CompleteResult {
     this.prune();
-    const request = this.pending.get(input.requestId);
-    if (request === undefined) return { kind: 'error_page', message: UNKNOWN_REQUEST };
+    const opened = this.open(input.requestId);
+    if (opened === undefined) return { kind: 'error_page', message: UNKNOWN_REQUEST };
+    const { request, nonce } = opened;
     const { binding } = request;
 
     const decision = this.deps.limiter.check(input.ip);
@@ -280,12 +315,12 @@ export class AuthorizationFlow {
       return {
         kind: 'login',
         requestId: input.requestId,
-        view: { ...request.view, error: LOGIN_FAILED },
+        view: { ...viewFor(binding), error: LOGIN_FAILED },
       };
     }
 
     this.deps.limiter.recordSuccess(input.ip);
-    this.pending.delete(input.requestId);
+    this.spent.set(nonce, request.expiresAt);
     const grantId = this.deps.tokens.createGrant({
       clientId: binding.clientId,
       resource: binding.resource,
@@ -345,11 +380,56 @@ export class AuthorizationFlow {
     return this.deps.tokens.issue(issued.grantId);
   }
 
+  /** base64url of iv (12 bytes), GCM tag (16 bytes) and the encrypted JSON of the request. */
+  private seal(request: PendingRequest): string {
+    const iv = randomBytes(SEAL_IV_BYTES);
+    const cipher = createCipheriv('aes-256-gcm', this.sealKey, iv);
+    const plain = JSON.stringify({ ...request.binding, expiresAt: request.expiresAt });
+    const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url');
+  }
+
+  /**
+   * The pending request a sealed field carries, or undefined when it does not decrypt under this
+   * instance's key (tampered, foreign or from before a restart), does not parse, has expired or
+   * already signed in. The nonce (the iv) names the request in the spent map.
+   */
+  private open(sealed: string): { request: PendingRequest; nonce: string } | undefined {
+    const bytes = Buffer.from(sealed, 'base64url');
+    if (bytes.length <= SEAL_IV_BYTES + SEAL_TAG_BYTES) return undefined;
+    const iv = bytes.subarray(0, SEAL_IV_BYTES);
+    const nonce = iv.toString('base64url');
+    let plain: string;
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', this.sealKey, iv, {
+        authTagLength: SEAL_TAG_BYTES,
+      });
+      decipher.setAuthTag(bytes.subarray(SEAL_IV_BYTES, SEAL_IV_BYTES + SEAL_TAG_BYTES));
+      plain = Buffer.concat([
+        decipher.update(bytes.subarray(SEAL_IV_BYTES + SEAL_TAG_BYTES)),
+        decipher.final(),
+      ]).toString('utf8');
+    } catch {
+      return undefined;
+    }
+    let raw;
+    try {
+      raw = parseJsonText(plain);
+    } catch {
+      return undefined;
+    }
+    const parsed = pendingSchema.safeParse(raw);
+    if (!parsed.success) return undefined;
+    const { expiresAt, state, ...rest } = parsed.data;
+    if (expiresAt <= this.deps.clock() || this.spent.has(nonce)) return undefined;
+    return { request: { binding: { ...rest, state }, expiresAt }, nonce };
+  }
+
   /** Expired entries count as unknown; they are dropped lazily on every call. */
   private prune(): void {
     const now = this.deps.clock();
-    for (const [id, request] of this.pending) {
-      if (request.expiresAt <= now) this.pending.delete(id);
+    for (const [nonce, expiresAt] of this.spent) {
+      if (expiresAt <= now) this.spent.delete(nonce);
     }
     for (const [code, issued] of this.codes) {
       if (issued.expiresAt <= now) this.codes.delete(code);
