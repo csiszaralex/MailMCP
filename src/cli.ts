@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hashPassword } from './auth/password.js';
@@ -67,10 +68,24 @@ function totpSetupCommand(account: string, io: CliIo): number {
   return EXIT_OK;
 }
 
-function openStore(io: CliIo): Store {
+/**
+ * Runs a command on the server's database. A missing file means a wrong MAILMCP_DATA_DIR far more
+ * often than a fresh install, so it fails instead of creating an empty database there.
+ */
+function withStore(io: CliIo, run: (store: Store) => number): number {
   const configured = io.env.MAILMCP_DATA_DIR;
   const dataDir = configured === undefined || configured === '' ? './data' : configured;
-  return Store.open(join(dataDir, 'mailmcp.sqlite'));
+  const path = join(dataDir, 'mailmcp.sqlite');
+  if (!existsSync(path)) {
+    io.stderr(`No database at ${path}. Is MAILMCP_DATA_DIR right?\n`);
+    return EXIT_FAILURE;
+  }
+  const store = Store.open(path);
+  try {
+    return run(store);
+  } finally {
+    store.close();
+  }
 }
 
 function iso(ms: number): string {
@@ -78,8 +93,7 @@ function iso(ms: number): string {
 }
 
 function tokensList(io: CliIo): number {
-  const store = openStore(io);
-  try {
+  return withStore(io, (store) => {
     const grants = store.listGrants();
     if (grants.length === 0) {
       io.stdout('No grants.\n');
@@ -98,23 +112,18 @@ function tokensList(io: CliIo): number {
       );
     }
     return EXIT_OK;
-  } finally {
-    store.close();
-  }
+  });
 }
 
 function tokensRevoke(id: string, io: CliIo): number {
-  const store = openStore(io);
-  try {
+  return withStore(io, (store) => {
     if (!store.revokeGrant(id, io.now())) {
       io.stderr(`No active grant with id ${id}.\n`);
       return EXIT_FAILURE;
     }
     io.stdout(`Revoked ${id}.\n`);
     return EXIT_OK;
-  } finally {
-    store.close();
-  }
+  });
 }
 
 function usageError(io: CliIo): number {

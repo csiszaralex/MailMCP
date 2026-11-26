@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -50,6 +50,11 @@ function harness(answers: string[], isTty = true): Harness {
     now: () => NOW,
   };
   return { io, out: () => out, err: () => err, prompts };
+}
+
+/** Creates the database the server would have created, with no grant in it. */
+function seedEmpty(): void {
+  Store.open(join(dir, 'mailmcp.sqlite')).close();
 }
 
 function seedGrant(id: string, revokedAt: number | null = null): void {
@@ -131,6 +136,7 @@ describe('totp-setup', () => {
 
 describe('tokens list', () => {
   it('prints No grants. for an empty store', async () => {
+    seedEmpty();
     const h = harness([]);
     expect(await runCli(['tokens', 'list'], h.io)).toBe(0);
     expect(h.out()).toBe('No grants.\n');
@@ -156,6 +162,26 @@ describe('tokens list', () => {
   });
 });
 
+describe('tokens without a database', () => {
+  it('fails with 1 and names the path instead of creating an empty database', async () => {
+    const missing = join(dir, 'nested');
+    for (const args of [
+      ['tokens', 'list'],
+      ['tokens', 'revoke', 'grant-1'],
+    ]) {
+      const h = harness([]);
+      h.io.env = { MAILMCP_DATA_DIR: missing };
+      expect(await runCli(args, h.io)).toBe(1);
+      expect(h.out()).toBe('');
+      expect(h.err()).toBe(
+        `No database at ${join(missing, 'mailmcp.sqlite')}. Is MAILMCP_DATA_DIR right?
+`,
+      );
+    }
+    expect(existsSync(missing)).toBe(false);
+  });
+});
+
 describe('tokens revoke', () => {
   it('revokes once with 0, then reports the repeat with 1', async () => {
     seedGrant('grant-1');
@@ -169,6 +195,7 @@ describe('tokens revoke', () => {
   });
 
   it('returns 1 for an unknown id', async () => {
+    seedEmpty();
     const h = harness([]);
     expect(await runCli(['tokens', 'revoke', 'nope'], h.io)).toBe(1);
     expect(h.err()).toContain('nope');
