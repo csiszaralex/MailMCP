@@ -163,11 +163,20 @@ describe('Store TOTP steps', () => {
     expect(store.claimTotpStep(101, 4_000)).toBe(true);
   });
 
+  it('refuses a step older than the newest claimed one', () => {
+    const store = memory();
+    expect(store.claimTotpStep(101, 3_000)).toBe(true);
+    // The previous step's code is still inside the ±1 tolerance, but a newer one was used.
+    expect(store.claimTotpStep(100, 4_000)).toBe(false);
+    expect(store.claimTotpStep(102, 4_000)).toBe(true);
+    expect(store.claimTotpStep(101, 4_000)).toBe(false);
+  });
+
   it('forgets steps older than 15 minutes', () => {
     const store = memory();
     expect(store.claimTotpStep(100, 0)).toBe(true);
-    expect(store.claimTotpStep(200, 15 * MINUTE + 1)).toBe(true);
-    expect(store.claimTotpStep(100, 15 * MINUTE + 2)).toBe(true);
+    expect(store.claimTotpStep(100, 15 * MINUTE)).toBe(false);
+    expect(store.claimTotpStep(100, 15 * MINUTE + 1)).toBe(true);
   });
 });
 

@@ -519,6 +519,18 @@ describe('AuthorizationFlow complete', () => {
     expect(replay.kind).toBe('login');
   });
 
+  it('does not accept an older unused code after a newer one signed in', async () => {
+    const s = setup();
+    const newer = rightCode(s.now() + STEP_MS);
+    const older = rightCode(s.now());
+    const first = await startLogin(s);
+    const done = s.flow.complete({ requestId: first, password: PASSWORD, totp: newer, ip: IP });
+    expect(done.kind).toBe('redirect');
+    const second = await startLogin(s);
+    const late = s.flow.complete({ requestId: second, password: PASSWORD, totp: older, ip: IP });
+    expect(late.kind).toBe('login');
+  });
+
   it('does not burn the totp step on a wrong password', async () => {
     const s = setup();
     const totp = rightCode(s.now());

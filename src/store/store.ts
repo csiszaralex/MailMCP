@@ -201,7 +201,11 @@ export class Store {
     this.oldestIpFailureStmt = db.prepare(
       'SELECT MIN(at) AS oldest FROM login_failures WHERE ip = ? AND at >= ?',
     );
-    this.claimStepStmt = db.prepare('INSERT OR IGNORE INTO totp_steps (step, at) VALUES (?, ?)');
+    // One statement, so the check and the insert cannot interleave with another writer.
+    this.claimStepStmt = db.prepare(
+      `INSERT INTO totp_steps (step, at) SELECT ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM totp_steps WHERE step >= ?)`,
+    );
     this.pruneStepsStmt = db.prepare('DELETE FROM totp_steps WHERE at < ?');
   }
 
@@ -301,9 +305,12 @@ export class Store {
     this.clearFailuresStmt.run(ip);
   }
 
-  /** False if the step was used before (within the kept window). */
+  /**
+   * False if this step or a newer one was claimed before (within the kept window): after a login
+   * with one code, an older code still inside the TOTP tolerance is refused too (D29).
+   */
   claimTotpStep(step: number, at: number): boolean {
     this.pruneStepsStmt.run(at - FAILURE_WINDOW_MS);
-    return changedOne(this.claimStepStmt.run(step, at));
+    return changedOne(this.claimStepStmt.run(step, at, step));
   }
 }
