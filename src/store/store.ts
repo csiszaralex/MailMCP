@@ -150,6 +150,7 @@ export class Store {
   private readonly touchGrantStmt: StatementSync;
   private readonly revokeGrantStmt: StatementSync;
   private readonly listGrantsStmt: StatementSync;
+  private readonly findGrantStmt: StatementSync;
   private readonly insertTokenStmt: StatementSync;
   private readonly findTokenStmt: StatementSync;
   private readonly markTokenUsedStmt: StatementSync;
@@ -173,6 +174,7 @@ export class Store {
       'UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL',
     );
     this.listGrantsStmt = db.prepare('SELECT * FROM grants ORDER BY created_at DESC, rowid DESC');
+    this.findGrantStmt = db.prepare('SELECT * FROM grants WHERE id = ?');
     this.insertTokenStmt = db.prepare(
       'INSERT INTO tokens (hash, grant_id, kind, expires_at) VALUES (?, ?, ?, ?)',
     );
@@ -243,6 +245,11 @@ export class Store {
   /** Newest first. */
   listGrants(): GrantRow[] {
     return this.listGrantsStmt.all().map((row) => toGrant(row));
+  }
+
+  findGrant(id: string): GrantRow | undefined {
+    const row = this.findGrantStmt.get(id);
+    return row === undefined ? undefined : toGrant(row);
   }
 
   insertToken(token: Omit<TokenRow, 'usedAt' | 'grant'>): void {

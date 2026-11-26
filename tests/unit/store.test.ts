@@ -53,6 +53,14 @@ describe('Store grants', () => {
     expect(store.listGrants()[0]?.revokedAt).toBe(7_000);
   });
 
+  it('finds a grant by id', () => {
+    const store = memory();
+    store.insertGrant(GRANT);
+    store.revokeGrant('grant-a', 7_000);
+    expect(store.findGrant('grant-a')).toEqual({ ...GRANT, revokedAt: 7_000 });
+    expect(store.findGrant('missing')).toBeUndefined();
+  });
+
   it('does not revoke an unknown grant', () => {
     expect(memory().revokeGrant('missing', 1)).toBe(false);
   });

@@ -51,10 +51,32 @@ export interface ConnectionErrorRecord {
 
 export type ConnectionLogger = (record: ConnectionErrorRecord) => void;
 
+/** One OAuth event (D37). Never a token, code, password or TOTP code. */
+export interface AuthEventRecord {
+  event:
+    | 'login_ok'
+    | 'login_failed'
+    | 'login_blocked'
+    | 'authorize_rejected'
+    | 'token_issued'
+    | 'token_refreshed'
+    | 'refresh_reuse'
+    | 'code_reuse';
+  /** Host of the client_id URL. */
+  client: string | null;
+  resource: string | null;
+  ip: string | null;
+  /** Short fixed text, never user input. */
+  reason: string | null;
+}
+
+export type AuthLogger = (record: AuthEventRecord) => void;
+
 /** One JSON line per record. Never put mail content, passwords or tokens in a record. */
-function writeLine(record: LogRecord | ConnectionErrorRecord): void {
+function writeLine(record: LogRecord | ConnectionErrorRecord | AuthEventRecord): void {
   process.stderr.write(`${JSON.stringify({ time: new Date().toISOString(), ...record })}\n`);
 }
 
 export const stderrLogger: Logger = writeLine;
 export const stderrConnectionLogger: ConnectionLogger = writeLine;
+export const stderrAuthLogger: AuthLogger = writeLine;
