@@ -261,6 +261,9 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
       }),
   );
 
+  // ImapMailWriter restores to All Mail on Gmail (#restorePath), which does not add the inbox label.
+  const GMAIL_RESTORE_NOTE =
+    'On Gmail the mail keeps its labels but comes back without the inbox (Gmail drops the inbox label when mail goes to the trash or spam); add INBOX with update_labels to put it back in the inbox.';
   const moves = [
     {
       name: 'trash',
@@ -271,8 +274,7 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
     {
       name: 'untrash',
       title: 'Restore from trash',
-      description:
-        'Moves a message or conversation out of the trash: on Gmail to All Mail with its labels kept, on other accounts to INBOX.',
+      description: `Moves a message or conversation out of the trash: on other accounts to INBOX, on Gmail to All Mail. ${GMAIL_RESTORE_NOTE}`,
       method: 'untrash',
     },
     {
@@ -284,8 +286,7 @@ export function registerWriteTools(server: McpServer, scope: ToolScope, deps: To
     {
       name: 'unmark_spam',
       title: 'Not spam',
-      description:
-        'Moves a message or conversation out of spam: on Gmail to All Mail with its labels kept, on other accounts to INBOX.',
+      description: `Moves a message or conversation out of spam: on other accounts to INBOX, on Gmail to All Mail. ${GMAIL_RESTORE_NOTE}`,
       method: 'unmarkSpam',
     },
   ] as const;

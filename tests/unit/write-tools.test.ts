@@ -211,6 +211,16 @@ describe('write tool list', () => {
     // ImapMailWriter.updateDraft replaces body and htmlBody together.
     expect(update).toContain("giving only body drops the draft's HTML version");
   });
+
+  it('says how a restored Gmail message gets back to the inbox', async () => {
+    const tools = await listTools();
+    for (const name of ['untrash', 'unmark_spam']) {
+      const description = toolOf(tools, name).description ?? '';
+      // ImapMailWriter restores to All Mail on Gmail (restorePath), not to the inbox.
+      expect(description, name).toContain('without the inbox');
+      expect(description, name).toContain('add INBOX with update_labels');
+    }
+  });
 });
 
 describe('write tool calls', () => {
