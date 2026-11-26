@@ -1,8 +1,12 @@
 import { existsSync } from 'node:fs';
+import { request } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { hashPassword } from './auth/password.js';
+import { AUTHORIZATION_SERVER_METADATA_PATH } from './auth/resources.js';
 import { clientHost } from './auth/tokens.js';
 import { base32Encode, newTotpSecret, otpauthUri } from './auth/totp.js';
+import { loadHealthTarget, type HealthTarget } from './config/runtime.js';
+import { errorClass } from './log.js';
 import { DEFAULT_DATA_DIR, Store, storePath } from './store/store.js';
 
 /** D36: the operator commands. Everything the commands touch comes through this object. */
@@ -14,6 +18,8 @@ export interface CliIo {
   isTty: boolean;
   env: Readonly<Record<string, string | undefined>>;
   now: () => number;
+  /** How long health waits for the answer (D40: 3 s). */
+  healthTimeoutMs: number;
 }
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -29,6 +35,7 @@ Commands:
   totp-setup [account]   Print a new TOTP secret and its otpauth:// URI (default account: admin)
   tokens list            List the OAuth grants
   tokens revoke <id>     Revoke a grant
+  health                 Check that the server answers (the Docker healthcheck)
   help                   Show this text
 `;
 
@@ -125,6 +132,43 @@ function tokensRevoke(id: string, io: CliIo): number {
   });
 }
 
+/** Resolves to null on a 200, otherwise to the reason. Never rejects. */
+function probe(target: HealthTarget, timeoutMs: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    // node:http, not fetch: fetch does not let the Host header be set.
+    const req = request(
+      {
+        host: target.host,
+        port: target.port,
+        path: AUTHORIZATION_SERVER_METADATA_PATH,
+        headers: { Host: target.hostHeader },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200 ? null : `HTTP ${String(res.statusCode)}`);
+      },
+    );
+    req.on('timeout', () => {
+      resolve('timeout');
+      req.destroy();
+    });
+    // After a timeout, destroy() also emits an error; the promise is settled by then.
+    req.on('error', (err) => {
+      const { code, name } = errorClass(err);
+      resolve(code ?? name);
+    });
+    req.end();
+  });
+}
+
+async function healthCommand(io: CliIo): Promise<number> {
+  const reason = await probe(loadHealthTarget(io.env), io.healthTimeoutMs);
+  if (reason === null) return EXIT_OK;
+  io.stderr(`health: ${reason}\n`);
+  return EXIT_FAILURE;
+}
+
 function usageError(io: CliIo): number {
   io.stderr(USAGE);
   return EXIT_USAGE;
@@ -141,6 +185,8 @@ async function dispatch(args: readonly string[], io: CliIo): Promise<number> {
       return hashPasswordCommand(io);
     case 'totp-setup':
       return totpSetupCommand(first ?? 'admin', io);
+    case 'health':
+      return healthCommand(io);
     case 'tokens':
       if (first === 'list') return tokensList(io);
       if (first === 'revoke' && second !== undefined && second !== '') {
@@ -223,6 +269,7 @@ function realIo(): CliIo {
     isTty,
     env: process.env,
     now: () => Date.now(),
+    healthTimeoutMs: 3_000,
   };
 }
 
