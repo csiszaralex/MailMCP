@@ -20,26 +20,30 @@ import type { ToolDeps } from './server.js';
 import { tlsSmtpSender } from './smtp/sender.js';
 import { Store } from './store/store.js';
 
-const HOSTNAME = '127.0.0.1';
 /** How long shutdown waits for open requests and IMAP logouts before it exits anyway. */
 const SHUTDOWN_GRACE_MS = 5_000;
+/** Expired tokens are deleted once an hour, a day after their expiry. */
+const PRUNE_INTERVAL_MS = 3_600_000;
+const PRUNE_AFTER_MS = 86_400_000;
 
 const accountsFile = process.env.MAILMCP_ACCOUNTS_FILE ?? 'accounts.yaml';
 
 let runtime;
 let config;
+let store;
 try {
   // Also enforces D30: the public URL and both auth secrets are required, and MAILMCP_DEBUG
   // (which prints mail content, D25) only starts with loopback addresses.
   runtime = loadRuntime(process.env);
   config = loadConfig(await readFile(accountsFile, 'utf8'), process.env);
+  store = Store.open(join(runtime.dataDir, 'mailmcp.sqlite'));
 } catch (err) {
   const message = err instanceof Error ? err.message : 'unknown error';
   process.stderr.write(`mailmcp: cannot start: ${message}\n`);
   process.exit(1);
 }
 
-const { port, debug } = runtime;
+const { host, port, debug } = runtime;
 const pool = new ImapPool(tlsConnector(config.passwordFor, debug));
 const providers = new Map(config.accounts.map((a) => [a.id, new ImapMailProvider(a, pool)]));
 const smtp = tlsSmtpSender(config.passwordFor, debug);
@@ -57,7 +61,6 @@ const deps: ToolDeps = {
   log: stderrLogger,
 };
 
-const store = Store.open(join(runtime.dataDir, 'mailmcp.sqlite'));
 const tokens = new TokenService(store, Date.now, stderrAuthLogger);
 const flow = new AuthorizationFlow({
   publicUrl: runtime.publicUrl,
@@ -86,15 +89,21 @@ const app = createApp(config.accounts, deps, {
   },
 });
 
+const pruneTimer = setInterval(() => {
+  store.pruneTokens(Date.now() - PRUNE_AFTER_MS);
+}, PRUNE_INTERVAL_MS);
+pruneTimer.unref();
+
 const accountCount = config.accounts.length;
-const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, () => {
+const publicOrigin = runtime.publicUrl.origin;
+const server = serve({ fetch: app.fetch, hostname: host, port }, () => {
   process.stderr.write(
-    `mailmcp: listening on http://${HOSTNAME}:${String(port)}/mcp (${String(accountCount)} accounts)${debug ? ' (protocol debug log on: mail content is printed)' : ''}\n`,
+    `mailmcp: listening on ${host}:${String(port)}, public URL ${publicOrigin} (${String(accountCount)} accounts)${debug ? ' (protocol debug log on: mail content is printed)' : ''}\n`,
   );
 });
 server.on('error', (err: Error) => {
   const { code, name } = errorClass(err);
-  process.stderr.write(`mailmcp: cannot listen on ${HOSTNAME}:${String(port)}: ${code ?? name}\n`);
+  process.stderr.write(`mailmcp: cannot listen on ${host}:${String(port)}: ${code ?? name}\n`);
   process.exit(1);
 });
 
@@ -108,7 +117,11 @@ const shutdown = (): void => {
       resolve();
     });
   });
-  void Promise.all([httpClosed, pool.closeAll()]).then(() => process.exit(0));
+  clearInterval(pruneTimer);
+  void Promise.all([httpClosed, pool.closeAll()]).then(() => {
+    store.close();
+    process.exit(0);
+  });
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
