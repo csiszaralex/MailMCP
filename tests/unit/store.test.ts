@@ -126,6 +126,17 @@ describe('Store login failures', () => {
     expect(store.countLoginFailures(0, '3.3.3.3')).toBe(0);
   });
 
+  it('finds the oldest failure of an ip since a time', () => {
+    const store = memory();
+    store.recordLoginFailure('1.1.1.1', 10 * MINUTE);
+    store.recordLoginFailure('1.1.1.1', 12 * MINUTE);
+    store.recordLoginFailure('2.2.2.2', 5 * MINUTE);
+    expect(store.oldestLoginFailure(0, '1.1.1.1')).toBe(10 * MINUTE);
+    expect(store.oldestLoginFailure(11 * MINUTE, '1.1.1.1')).toBe(12 * MINUTE);
+    expect(store.oldestLoginFailure(13 * MINUTE, '1.1.1.1')).toBeUndefined();
+    expect(store.oldestLoginFailure(0, '3.3.3.3')).toBeUndefined();
+  });
+
   it('clears the failures of one ip only', () => {
     const store = memory();
     store.recordLoginFailure('1.1.1.1', 10 * MINUTE);

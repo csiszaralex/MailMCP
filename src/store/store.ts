@@ -160,6 +160,7 @@ export class Store {
   private readonly countFailuresStmt: StatementSync;
   private readonly countIpFailuresStmt: StatementSync;
   private readonly clearFailuresStmt: StatementSync;
+  private readonly oldestIpFailureStmt: StatementSync;
   private readonly claimStepStmt: StatementSync;
   private readonly pruneStepsStmt: StatementSync;
 
@@ -197,6 +198,9 @@ export class Store {
       'SELECT COUNT(*) AS n FROM login_failures WHERE ip = ? AND at >= ?',
     );
     this.clearFailuresStmt = db.prepare('DELETE FROM login_failures WHERE ip = ?');
+    this.oldestIpFailureStmt = db.prepare(
+      'SELECT MIN(at) AS oldest FROM login_failures WHERE ip = ? AND at >= ?',
+    );
     this.claimStepStmt = db.prepare('INSERT OR IGNORE INTO totp_steps (step, at) VALUES (?, ?)');
     this.pruneStepsStmt = db.prepare('DELETE FROM totp_steps WHERE at < ?');
   }
@@ -284,6 +288,13 @@ export class Store {
         : this.countIpFailuresStmt.get(ip, since);
     if (row === undefined) throw new Error('Store count returned no row.');
     return int(row, 'n');
+  }
+
+  /** Time of the oldest failure of `ip` at or after `since`, or undefined if there is none. */
+  oldestLoginFailure(since: number, ip: string): number | undefined {
+    const row = this.oldestIpFailureStmt.get(ip, since);
+    if (row === undefined) throw new Error('Store oldest failure returned no row.');
+    return intOrNull(row, 'oldest') ?? undefined;
   }
 
   clearLoginFailures(ip: string): void {
