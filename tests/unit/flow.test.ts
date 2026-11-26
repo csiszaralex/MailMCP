@@ -659,4 +659,19 @@ describe('AuthorizationFlow redeem', () => {
       reason: 'code reused',
     });
   });
+
+  it('revokes the grant when a redeemed code comes back even with wrong parameters', async () => {
+    // RFC 6749 4.1.2: a second use of a code revokes what it issued; the reuse alone proves the
+    // code leaked, whoever sends it.
+    const s = setup();
+    const code = await codeFor(s);
+    const first = s.flow.redeem(redeemParams(code), IP);
+    const stranger = redeemParams(code, {
+      client_id: 'https://claude.com/oauth/other',
+      code_verifier: `${VERIFIER.slice(0, -1)}A`,
+    });
+    expect(grantError(() => s.flow.redeem(stranger, IP)).code).toBe('invalid_grant');
+    await expect(s.tokens.verifyAccessToken(first.access_token)).rejects.toThrow();
+    expect(s.records.at(-1)).toMatchObject({ event: 'code_reuse', ip: IP });
+  });
 });
