@@ -64,7 +64,7 @@ Minden más útvonal 404. Hitelesítés nélkül csak az OAuth metaadat, az auth
 | Egység | Feladat | Függ |
 |---|---|---|
 | `config` | Az `accounts.yaml` és a titkok beolvasása, validálása zod sémával | semmi |
-| `store` | SQLite: OAuth kliensek, tokenhash-ek, próbálkozásszámlálók. Levél nincs benne | semmi |
+| `store` | SQLite: engedélyezések, tokenhash-ek, próbálkozásszámlálók, felhasznált TOTP lépések (D27). Levél nincs benne | semmi |
 | `auth` | OAuth szerver, a token ellenőrzése minden `/mcp` kérésnél, erőforráshoz kötés | `store`, `config` |
 | `providers` | `MailProvider` interfész; `ImapSmtpProvider` megvalósítás, Gmail kiterjesztésekkel, ha `provider: gmail` | `config` |
 | `tools` | Az MCP eszközök. Csak a fiók szintje által engedett eszközök regisztrálódnak | `providers`, `aggregate` |
@@ -131,7 +131,7 @@ Minden eszközleírás jelzi, hogy a levéltartalom nem megbízható adat (promp
 | D22 | Címkék nem Gmail fióknál (`update_labels`): `UNREAD` és `STARRED` a `\Seen` és `\Flagged` jelzőre fordul; egy mappa hozzáadása áthelyezés oda; az `INBOX` levétele archiválás az Archive mappába (SPECIAL-USE `\Archive` vagy a `mailboxes.archive` konfig). Más kombináció hibát ad. Gmailnél minden név valódi címke (`X-GM-LABELS`), az `UNREAD` és `STARRED` ott is jelző, és az id nem változik | Az IMAP mappában egy levél egyszerre csak egy helyen lehet |
 | D23 | `manage_label` (`create`, `rename`, `delete`): az INBOX és a speciális mappák nem nevezhetők át és nem törölhetők. Mappa és címke csak üresen törölhető, Gmailnél is | Nem Gmail fióknál a mappa törlése a leveleit is törli; Gmailnél a levelek megmaradnak, de elveszik, melyiken volt a címke, és a `draft` szint minden művelete visszafordítható. A címke előbb az `update_labels`-szel szedhető le |
 | D24 | `trash`, `untrash`, `mark_spam`, `unmark_spam` üzenetre és szálra, áthelyezéssel a Trash vagy Junk mappába. Visszaállítás Gmailnél az „Összes levél” mappába (a címkék megmaradnak, ahogy a connectorban; a beérkezettek címkéjét a Gmail a kukába tételkor leveszi, az `update_labels`-szel tehető vissza), más fióknál az INBOX-ba. A válasz az áthelyezett levelek új id-jét adja. Gmailnél a keresés az „Összes levél” mappában fut, amiben a kuka és a spam nincs benne, ezért az `in:trash` és `in:spam` (és az aliasaik, például `in:bin`, `in:junk`) a Trash, illetve a Spam mappában keres | Áthelyezés után a régi id (mappa és UID) érvénytelen |
-| D25 | `MAILMCP_DEBUG=1`: az imapflow és a nodemailer protokoll naplója a stderr-re. Levéltartalmat is kiír (a jelszót az imapflow kitakarja), ezért alapból ki van kapcsolva, és csak a lokális (`127.0.0.1`) futásban engedett; a nyilvános telepítés ezzel nem indul el | Hibakereséshez kell, de a valódi fiókok leveleit nem szabad minden futásnál a terminálba írni |
+| D25 | `MAILMCP_DEBUG=1`: az imapflow és a nodemailer protokoll naplója a stderr-re. Levéltartalmat is kiír (a jelszót az imapflow és a nodemailer kitakarja), ezért alapból ki van kapcsolva, és csak a lokális futásban engedett (D30); a nyilvános telepítés ezzel nem indul el | Hibakereséshez kell, de a valódi fiókok leveleit nem szabad minden futásnál a terminálba írni |
 
 Hibakódok bővülnek: `invalid_argument` (a hívás paraméterei hiányosak vagy nem illenek össze; az `invalid_id` csak a nem értelmezhető azonosítóra marad), `not_permitted` (a fiók szintje nem engedi), `unsupported_server` (hiányzó UIDPLUS, illetve áthelyezésnél MOVE és UIDPLUS egyaránt hiányzik), `send_failed` (az SMTP szerver elutasította vagy nem érhető el), `update_failed` (az IMAP szerver elutasította a jelző, címke vagy áthelyezés módosítását; az elutasítás előtt már elmentett módosítások megmaradnak).
 
@@ -162,12 +162,24 @@ accounts:
 ### Titkok (környezeti változók, titkosított env fájlból)
 
 - `MAILMCP_PASSWORD_<FIÓK-ID>`: alkalmazásjelszó, fiókonként egy (az id nagybetűvel, a kötőjel aláhúzásra cserélve);
-- `MAILMCP_ADMIN_PASSWORD_HASH`: a bejelentkezés argon2 hash-e;
-- `MAILMCP_TOTP_SECRET`: a TOTP második faktor titka.
+- `MAILMCP_ADMIN_PASSWORD_HASH`: a bejelentkezés argon2id hash-e (D28);
+- `MAILMCP_TOTP_SECRET`: a TOTP második faktor titka, base32 (D29).
+
+### Beállítások (környezeti változók, nem titkok)
+
+| Változó | Jelentés | Alapérték |
+|---|---|---|
+| `MAILMCP_PUBLIC_URL` | A szerver nyilvános címe útvonal nélkül, ebből képződnek az erőforrás-azonosítók (D30) | nincs, kötelező |
+| `MAILMCP_HOST` | A figyelt cím; konténerben `0.0.0.0` | `127.0.0.1` |
+| `MAILMCP_PORT` | A figyelt port | `8787` |
+| `MAILMCP_DATA_DIR` | A SQLite fájl könyvtára (D27) | `./data` |
+| `MAILMCP_BEHIND_PROXY` | `1`: a kliens címe az `X-Forwarded-For` utolsó eleme (D34) | `0` |
+| `MAILMCP_ACCOUNTS_FILE` | Az `accounts.yaml` helye | `accounts.yaml` |
+| `MAILMCP_DEBUG` | Protokollnapló (D25) | `0` |
 
 ### Indulás
 
-A szerver nem indul el, ha a YAML hibás, ha két fióknak azonos az id-je, vagy ha bármelyik fiókhoz hiányzik a jelszó. A log pontosan megnevezi a hibát. Futás közbeni újratöltés nincs: fiók hozzáadása a YAML és a titkok módosítása, majd a konténer újraindítása.
+A szerver nem indul el, ha a YAML hibás, ha két fióknak azonos az id-je, ha bármelyik fiókhoz hiányzik a jelszó, ha a `MAILMCP_PUBLIC_URL`, a jelszó hash vagy a TOTP titok hiányzik vagy hibás, vagy ha a hibakereső kapcsoló nem lokális futásban van bekapcsolva (D30). A log pontosan megnevezi a hibát. Futás közbeni újratöltés nincs: fiók hozzáadása a YAML és a titkok módosítása, majd a konténer újraindítása.
 
 ## OAuth és biztonság
 
@@ -184,12 +196,12 @@ A szerver nem indul el, ha a YAML hibás, ha két fióknak azonos az id-je, vagy
 
 ### Bejelentkezés
 
-- Jelszó (argon2) és TOTP.
-- Próbálkozáskorlát: 5 hibás kísérlet után 15 perc tiltás IP-nként, és globális lassítás.
+- Jelszó (argon2id, D28) és TOTP (D29), egy oldalon, munkamenet süti nélkül (D31).
+- Próbálkozáskorlát: 5 hibás kísérlet után 15 perc tiltás IP-nként, és globális lassítás (D34).
 
 ### Kezelés
 
-Konténeren belüli CLI: kliensek és tokenek listázása, egy kliens vagy token visszavonása.
+Konténeren belüli CLI (D36): jelszó hash és TOTP titok előállítása, az engedélyezések listázása és visszavonása. Egy engedélyezés egy bejelentkezés minden tokenje, így a visszavonása az adott kliens hozzáférését szünteti meg.
 
 ### Konténer
 
@@ -202,6 +214,25 @@ Kötelező TLS: 993 és 465 implicit TLS, vagy 587 kötelező STARTTLS. A tanús
 ### Naplózás
 
 Levéltartalom, jelszó és token soha nem kerül a logba. Minden eszközhívásról egy sor: eszköz, fiók, eredmény, időtartam, üzenetazonosító. Címzett és tárgy sem. Kivétel csak a lokális hibakereső kapcsoló (D25).
+
+### Hitelesítés (3. fázis döntései, 2026-11-26)
+
+| # | Döntés | Indok |
+|---|---|---|
+| D26 | Futtatókörnyezet: **Node 26 LTS** (`engines` `>=26.13`). SQLite a beépített `node:sqlite` modullal (`DatabaseSync` osztály: a Node 26 új neve `Database`, de a `@types/node` 26.6.11 csak a régit ismeri, és futásidőben a kettő ugyanaz), argon2 és HMAC a beépített `node:crypto` modullal. Új futásidejű függőség nincs | A Node 26 2026-10-28 óta Active LTS, 2029-04-30-ig támogatott; a 24 2026-10-20 óta csak karbantartást kap. A 26.13.1 a `node:sqlite` betöltésekor már nem ír „experimental” figyelmeztetést (a 24.11.1 még igen). A `better-sqlite3` natív fordítást igényelne, amit a `pnpm-workspace.yaml` tilt, és a Docker image-be build eszközök kellenének |
+| D27 | Tárolás: SQLite fájl a `MAILMCP_DATA_DIR` könyvtárban (`mailmcp.sqlite`, WAL mód). Táblák: engedélyezések (kliens, erőforrás, létrehozás, utolsó használat, visszavonás), tokenek (hash, engedélyezés, fajta, lejárat, felhasználás ideje), hibás bejelentkezések (IP, időpont), felhasznált TOTP lépések. A függőben lévő authorize kérések, az authorization code-ok és a CIMD gyorsítótár memóriában vannak; újraindításkor elvesznek, és a bejelentkezést újra kell kezdeni. A token 32 véletlen bájt base64url alakban, a táblában a SHA-256 hash-e áll | A 256 bites véletlen tokent nem lehet szótárral törni, ezért gyors hash elég; a lassú argon2 a jelszónak kell. A rövid életű (legfeljebb 10 perces) adatot fölösleges lemezre írni |
+| D28 | Jelszó hash: argon2id a `crypto.argon2` függvénnyel, 19 MiB memória, 2 menet, 1 szál, 16 bájtos só, 32 bájtos kimenet, a szokásos `$argon2id$v=19$m=19456,t=2,p=1$<só>$<hash>` alakban. Ellenőrzés időzítés-biztos összehasonlítással. A hash-t a `hash-password` parancs állítja elő (D36) | Az OWASP ajánlott argon2id paraméterei. Node 26.13.1-en egy ellenőrzés kb. 26 ms. A Node `--env-file` a `$` jeleket változatlanul hagyja (mérve), Compose interpolációnál `$$` kell (lásd Telepítés) |
+| D29 | TOTP saját megvalósítással (RFC 6238): HMAC-SHA1, 30 másodperces lépés, 6 számjegy, ±1 lépés tűrés, az RFC tesztvektoraival tesztelve. Egy már elfogadott lépés kódja nem fogadható el újra. A titok 20 véletlen bájt base32 alakban, a `totp-setup` parancs adja egy `otpauth://` címmel együtt (D36) | Kb. 40 sor a `node:crypto` HMAC-ján, ezért nem éri meg miatta függőséget behozni. Az `otpauth://` címet a Bitwarden és az authenticator appok közvetlenül felveszik |
+| D30 | **A hitelesítés mindig be van kapcsolva**, lokálisan is. A `MAILMCP_PUBLIC_URL` kötelező, útvonal nélküli cím: `http://` csak loopback hostnál (`127.0.0.1`, `localhost`), különben `https://`. Az erőforrás-azonosítók `<PUBLIC_URL>/mcp` és `<PUBLIC_URL>/mcp/<fiók-id>`, az issuer maga a `MAILMCP_PUBLIC_URL`. A kérés `Host` fejlécének hostja a cím hostja kell legyen; ha van `Origin` fejléc, annak a cím originjével kell egyeznie, különben `403`. A hibakereső kapcsoló (D25) csak akkor indul el, ha a cím és a `MAILMCP_HOST` is loopback | Egy véletlenül kitett szerver se legyen bejelentkezés nélkül elérhető, és lokálisan ugyanazt a folyamatot próbáljuk ki, mint élesben. Ez váltja a 2. fázis csak lokális, hitelesítés nélküli módját |
+| D31 | Authorize: a `GET /authorize` ellenőrzi a kérést (`response_type=code`, engedélyezett `client_id` és a CIMD szerinti `redirect_uri` (D35), `code_challenge_method=S256`, ismert `resource`), és a bejelentkező oldalt adja. Amíg a `client_id` és a `redirect_uri` nincs ellenőrizve, a hiba egy HTML oldal, és a szerver nem irányít át; utána a hiba átirányítás `error` paraméterrel. A függőben lévő kérés egy 128 bites véletlen azonosítóval 10 percig él, egyszer használható. A `POST /authorize` az azonosítót, a jelszót és a TOTP kódot fogadja, csak a cím saját `Origin`-jével. Siker után 60 másodperces, egyszer használható code megy a `redirect_uri`-ra a `state` és az `iss` paraméterrel. Munkamenet süti nincs. Az oldal mutatja a `client_id` hostját, a visszahívás hostját és az erőforrást, loopback visszahívásnál figyelmeztetéssel. Fejlécek: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer` | Süti nélkül nincs sütihez kötött támadási felület (CSRF, ellopott munkamenet), és a 30 napos refresh token miatt ritkán kell belépni. A kitalálhatatlan azonosító és az `Origin` ellenőrzés együtt kiváltja a CSRF tokent. A hibás `redirect_uri`-ra irányítás nyitott átirányító lenne |
+| D32 | Token végpont: `application/x-www-form-urlencoded`. `authorization_code`: `code`, `redirect_uri`, `client_id`, `code_verifier` kötelező és egyezik a kiadáskorival; a `resource` elhagyható, de ha van, egyezik. `refresh_token`: cserélődik, és egy már felhasznált refresh token újbóli használata az egész engedélyezést visszavonja. Minden hiba `invalid_grant` vagy `invalid_request` JSON-ben, `Cache-Control: no-store`. A válasz: `access_token`, `token_type: Bearer`, `expires_in: 3600`, `refresh_token`, `scope`. Minden refresh token a kiadásától 30 napig él | A spec „OAuth szerver” pontjai, a code a kliens, a visszahívás, a PKCE és az erőforrás négyesére kötve |
+| D33 | Erőforráshoz kötés: a token csak azon az erőforráson érvényes, amelyre kiadták; a `/mcp` címre kiadott token a `/mcp/<fiók-id>` címen sem. Az ellenőrzés az SDK `requireBearerAuth` segédjével megy (`expectedResource`), a `401` az adott végpont saját metaadat címét adja | Egyetlen szabály, kivétel nélkül. A `/mcp` minden fiókot elér, ezért a „minden fiókhoz érvényes” token ott is ezt jelenti |
+| D34 | Próbálkozáskorlát: IP-nként 15 percen belül 5 hibás kísérlet után 15 perc tiltás (`429`, `Retry-After`). Ha 15 percen belül mindenhonnan együtt legalább 20 hibás kísérlet volt, a bejelentkezés 3 másodpercenként csak egy kísérletet fogad, a többire `429`. Sikeres belépés törli az IP számlálóját. A jelszó hash mindig kiszámolódik, a hibaüzenet nem árulja el, melyik mező volt hibás. A kliens címe `MAILMCP_BEHIND_PROXY=1` mellett az `X-Forwarded-For` utolsó eleme, különben a kapcsolat címe | Az infra repó Traefikje nem bízik a bejövő `X-Forwarded-For`-ban (nincs `forwardedHeaders.trustedIPs`), ezért az utolsó elemet ő írja; a korábbiakat a kliens hamisíthatja. A globális korlát a sok címről jövő próbálkozást fogja meg |
+| D35 | CIMD letöltés: csak `https://claude.ai` és `https://claude.com` originről (D10), átirányítás követése nélkül, 5 másodperces időkorláttal, legfeljebb 64 KiB, JSON. A dokumentum `client_id` mezője egyezik az URL-lel, a `token_endpoint_auth_method` `none`, a `redirect_uris` nem üres. A dokumentum 10 percig a memóriában marad | Az átirányítás követése kivinné a letöltést az engedélyezett originről. A Claude a discovery-re és a tokenre 10 másodpercet vár, a letöltésnek bele kell férnie |
+| D36 | CLI: `pnpm cli <parancs>` (fejlesztésben), `node dist/cli.js <parancs>` (konténerben). Parancsok: `hash-password` (rejtve bekéri a jelszót, csak a hash-t írja ki), `totp-setup` (új titok és `otpauth://` cím), `tokens list` (engedélyezések: id, kliens host, erőforrás, létrehozás, utolsó használat), `tokens revoke <id>`. A Docker healthcheck parancs a 4. fázisba kerül | A titkok előállítása is a szerver kódjával megy, így a formátum biztosan egyezik |
+| D37 | Naplózás: minden OAuth eseményről egy sor (bejelentkezés sikere vagy hibája, kiadott token, csere, újrafelhasználás miatti visszavonás) a kliens hostjával, az erőforrással és a kliens IP-címével. Token, code, jelszó és TOTP kód soha | A „Naplózás” pont szabálya az OAuth eseményekre |
+
+Az OAuth végpontok hibái az RFC 6749 szerinti JSON-ök (`error`, `error_description`), nem a levéleszközök hibakódjai.
 
 ## Deploy
 
@@ -244,7 +275,7 @@ Tesztlevél csak Alex saját, plusz jeles teszt címére megy (`<cím>+mailmcp-<
 | A `@modelcontextprotocol/server` 2.4.0 auth exportjai: `requireBearerAuth`, `verifyBearerToken`, `bearerAuthChallengeResponse`, `buildOAuthProtectedResourceMetadata`, `getOAuthProtectedResourceMetadataUrl`, `oauthMetadataResponse`, `checkResourceAllowed`, `OAuthError`. Authorize, token vagy regisztrációs végpont megvalósítása nincs benne | `npm pack @modelcontextprotocol/server@2.4.0`, a `dist/*.d.mts` exportjai és az `authorization_endpoint`, `registration_endpoint`, `code_challenge` kulcsok keresése a `dist` fájlokban (2026-11-22) |
 | A claude.ai, Desktop, mobil és Cowork visszahívási címe: `https://claude.ai/api/mcp/auth_callback`. Egy régebbi Anthropic cikk szerint később `https://claude.com/api/mcp/auth_callback` is lehet | [Authentication for connectors](https://claude.com/docs/connectors/building/authentication) (2026-11-22) |
 | A Claude CIMD-t választ, ha a metaadatban `client_id_metadata_document_supported: true` és `token_endpoint_auth_methods_supported` tartalmazza a `none` értéket; különben DCR-re vált | ugyanott |
-| A Claude Code CIMD dokumentuma: `client_id` = `https://claude.ai/oauth/claude-code-client-metadata`, `redirect_uris` = `http://localhost/callback`, `http://127.0.0.1/callback`, `token_endpoint_auth_method` = `none`. A port véletlenszerű, port nélküli egyezés kell | a dokumentum letöltése (2026-11-22) |
+| A Claude Code CIMD dokumentuma: `client_id` = `https://claude.ai/oauth/claude-code-client-metadata`, `redirect_uris` = `http://localhost/callback`, `http://127.0.0.1/callback`, `token_endpoint_auth_method` = `none`. A port véletlenszerű, port nélküli egyezés kell | a dokumentum letöltése (2026-11-22, változatlan 2026-11-26) |
 | A bejelentkezés csak `401` válaszra indul `WWW-Authenticate: Bearer resource_metadata=...` fejléccel; a metaadat `resource` mezőjének pontosan egyeznie kell a csatolt URL-lel, útvonallal együtt | [Authentication for connectors](https://claude.com/docs/connectors/building/authentication), [Lazy authentication](https://claude.com/docs/connectors/building/lazy-authentication) (2026-11-22) |
 | Időkorlátok: discovery és token 10 s, refresh 30 s. A Claude legfeljebb 5 perccel lejárat előtt és `401`-re frissít | [Authentication for connectors](https://claude.com/docs/connectors/building/authentication) (2026-11-22) |
 | Az Anthropic kimenő forgalma a `160.79.104.0/21` tartományból jön | ugyanott |
@@ -252,8 +283,13 @@ Tesztlevél csak Alex saját, plusz jeles teszt címére megy (`<cím>+mailmcp-<
 | Az imapflow 2.12.2 `messageDelete` UIDPLUS nélkül sima `EXPUNGE`-t küld (a mappa minden `\Deleted` levelét törli), a `messageMove` MOVE nélkül COPY, `\Deleted` és ugyanez az EXPUNGE | `dist/cjs/commands/expunge.js`, `move.js` (2026-11-23) |
 | A nodemailer 10.6.1 ESM csomag saját `.d.ts` típusokkal (a `@types/nodemailer` nem kell); van `disableFileAccess`, `disableUrlAccess`, `keepBcc` | `npm pack nodemailer@10.6.1`, `dist/esm` (2026-11-23) |
 | Az MCP SDK 2.4.0 alapból legfeljebb 4 MiB-os kéréstörzset fogad (`DEFAULT_MAX_REQUEST_BODY_SIZE`), a `maxRequestBodySize` opcióval állítható | `dist/index.mjs` (2026-11-23) |
+| A Node 26 2026-10-28 óta Active LTS (Lithium), vége 2029-04-30; a Node 24 2026-10-20 óta maintenance. Legfrissebb: 26.13.1 (2026-11-10) | `nodejs.org/dist/index.json`, `nodejs/Release` `schedule.json` (2026-11-26) |
+| A `node:sqlite` a 26.13.1 dokumentációjában „1.2 Release candidate”, de a `lib/sqlite.js` már nem hívja az `emitExperimentalWarning`-ot (a 24.11.1 igen). Az osztály neve `Database`, a `DatabaseSync` csak alias (DEP0210). A `crypto.argon2Sync('argon2id', …)` 19 MiB-tal kb. 26 ms | a `v26.13.1` és `v24.11.1` tag `lib/sqlite.js` fájlja, `api/sqlite.json`; `fnm exec --using=26.13.1 node -e …` (2026-11-26) |
+| Az SDK `requireBearerAuth` `expectedResource` opciója a verifier által adott `AuthInfo.resource`-szal hasonlít (töredék és egy záró perjel nélkül), és elutasítja a lejárat nélküli tokent. A `buildOAuthProtectedResourceMetadata` localhoston kívül HTTPS issuert követel | `dist/index.d.mts` (2026-11-26) |
+| Az infra repó Traefikje nem bízik a bejövő `X-Forwarded-For`-ban (nincs `forwardedHeaders.trustedIPs`), és felülírja | `proxy/docker-compose.yml`, `kaneo/docker-compose.yml` megjegyzése (2026-11-26) |
+| A Node `--env-file` a `$` jeleket változatlanul hagyja (az argon2 hash idézőjel nélkül is épen jön át) | `node --env-file` egy `$argon2id$…` értékkel (2026-11-26) |
 
-Nem mérhető most, az átvételi teszten mérjük: hogy a claude.ai (hosztolt) kliens a mi szerverünkkel valóban CIMD-t választ-e, és hogy mindkét kliens küldi-e a `resource` paramétert.
+Nem mérhető most, az átvételi teszten mérjük: hogy a claude.ai (hosztolt) kliens a mi szerverünkkel valóban CIMD-t választ-e, és hogy mindkét kliens küldi-e a `resource` paramétert. A Claude Code-ot a 3. fázis végén lokálisan (`http://127.0.0.1`) mérjük: a szerver a CIMD dokumentumot kimenő kéréssel tölti le a claude.ai-ról, a visszahívás pedig loopback, ezért ehhez nem kell nyilvános cím. A claude.ai csak a 4. fázis nyilvános telepítése után próbálható ki, mert az Anthropic szervereiről hívja a szervert.
 
 A 2. fázis kézi próbáján (2026-11-25) mért eredmények: a Gmail SMTP egy példányt ment a Sent mappába, a törölt piszkozat a kukába kerül, a kukából visszaállított levél a címkéit megtartja, a beérkezettek címkéjét nem; a work fiók Courier-IMAP szervere UIDPLUS-t ad, MOVE-ot és SPECIAL-USE-t nem, a Sent mappát név alapján találja meg; az IMAP ENVELOPE a hiányzó Reply-To helyett a From címet adja. Az eredeti mérési lista:
 
