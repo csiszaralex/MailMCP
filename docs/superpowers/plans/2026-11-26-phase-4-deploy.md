@@ -6,7 +6,7 @@
 
 **Architecture:** Az app repóban: a naplóba a teljes `client_id` kerül (Task 1), új `health` CLI parancs (Task 2), Dockerfile (Task 3), GitHub Actions (Task 4), dokumentáció (Task 5). Az infra repóban (`P:\00_Store\infra`, saját konvenciókkal): a stack, a hálózat és a figyelés (Task 6), az élesítés (Task 7). Végül az átvétel és a mért értékek rögzítése (Task 8, 9).
 
-**Tech Stack:** a 3. fázisé. Új függőség nincs. CI: `actions/checkout@v7`, `pnpm/action-setup@v6`, `actions/setup-node@v7`, `docker/login-action@v4`, `docker/metadata-action@v6`, `docker/setup-buildx-action@v4`, `docker/build-push-action@v7`.
+**Tech Stack:** a 3. fázisé. Új függőség nincs. CI: `actions/checkout` v7.0.1, `pnpm/action-setup` v6.1.1, `actions/setup-node` v7.1.0, `docker/login-action` v4.8.0, `docker/metadata-action` v6.2.0, `docker/setup-buildx-action` v4.4.1, `docker/build-push-action` v7.4.0, a záró review után commit SHA-ra rögzítve.
 
 **Spec:** [`docs/superpowers/specs/2026-11-22-mailmcp-design.md`](../specs/2026-11-22-mailmcp-design.md), különösen a „Deploy” fejezet és a „Telepítés (4. fázis döntései)” tábla (D38-D48).
 
@@ -28,7 +28,7 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 - **Lokális Docker:** 29.6.2, a build és a konténer itt kipróbálható.
 - **pnpm:** `packageManager` `pnpm@12.21.0+sha512...`; a `pnpm-workspace.yaml` `allowBuilds` minden build scriptet tilt, natív modul nincs.
 - **Az SQLite fájl:** `<MAILMCP_DATA_DIR>/mailmcp.sqlite` (`STORE_FILE_NAME`, `src/store/store.ts`), mellette `-wal` és `-shm`.
-- **AS metaadat útvonala:** `AUTHORIZATION_SERVER_METADATA_PATH` (`src/http/oauth-routes.ts`).
+- **AS metaadat útvonala:** `AUTHORIZATION_SERVER_METADATA_PATH` (a Task 2 óta `src/auth/resources.ts`, hogy a healthcheck ne töltse be a Honót és az SDK-t).
 - **Infra repó mintái:** saját Node app SQLite-tal: `journal/docker-compose.yml` (`x-svc` anchor, `mem_limit`, `NODE_OPTIONS`, Traefik címkék, `traefik.docker.network`). Hostnév: `<stack>/stack.vars` `APP_HOST=...`, a compose-ban `${APP_HOST:?}`. Belső háló a Traefikkel: `admin_network` (`bin/vps-from-scratch.sh` hozza létre `--internal`-lal, a `proxy/docker-compose.yml` külső hálóként hivatkozik rá). Végpontok és várt kódok: `common/endpoints.json`, ezt olvassa a `scripts/Test-PublicEndpoints.ps1` és a `kuma/tofu`. Stackek táblája: `README.md` „Stackek”. Az `oom_score_adj` értékek indoka: `README.md` „Compose konvenciók”.
 
 ## Review Focus
@@ -47,7 +47,7 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 | `src/log.ts`, `src/auth/flow.ts` | D47: a `client` mező a teljes `client_id` |
 | `src/config/runtime.ts`, `src/cli.ts` | D40: `health` parancs |
 | `Dockerfile`, `.dockerignore` (új) | D39 |
-| `tests/unit/dockerfile.test.ts` (új) | A `FROM` sorok Node verziója egyezik a `.node-version`-nel |
+| `tests/unit/docker-image.test.ts` (új) | A `NODE_IMAGE` Node verziója egyezik a `.node-version`-nel, digesttel rögzített, és minden `FROM` erre épül |
 | `.github/workflows/ci.yml` (új), `package.json` (`format:check`) | D41 |
 | `README.md` | Konténeres futtatás, állapot |
 | infra: `mailmcp/docker-compose.yml`, `mailmcp/stack.vars`, `mailmcp/accounts.yaml`, `mailmcp/.sops.env` (új) | A stack |
@@ -59,7 +59,7 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 ### Task 1: A teljes `client_id` a naplóban (D47)
 
 **Files:**
-- Modify: `src/log.ts` (`AuthEventRecord.client` doc komment), `src/auth/flow.ts` (a két `clientHost(...)` hívás a naplórekordban)
+- Modify: `src/log.ts` (`AuthEventRecord.client` doc komment), `src/auth/flow.ts` (a két `clientHost(...)` hívás a naplórekordban), `src/auth/tokens.ts` (a token események naplórekordja)
 - Modify: a tesztek, amelyek `client: 'claude.ai'`-t várnak (`grep -rn "client: 'claude.ai'" tests`)
 
 - [ ] **Step 1:** A tesztekben a várt érték a teljes URL (például `https://claude.ai/oauth/claude-code-client-metadata`). Futtatás: piros.
@@ -84,7 +84,9 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 ### Task 3: Dockerfile (D39)
 
 **Files:**
-- Create: `Dockerfile`, `.dockerignore`, `tests/unit/dockerfile.test.ts`
+- Create: `Dockerfile`, `.dockerignore`, `tests/unit/docker-image.test.ts` (eredetileg `dockerfile.test.ts`; az IDE a nevéből Dockerfile-nak nézte)
+
+> A záró review után a Dockerfile két ponton eltér az alábbi vázlattól: az alap image egy `NODE_IMAGE` argumentumban, digesttel rögzítve szerepel, és a pnpm tarball a `packageManager` hash-ével ellenőrzött. A végleges alak a `Dockerfile`.
 
 - [ ] **Step 1:** A teszt beolvassa a `Dockerfile`-t és a `.node-version`-t, és minden `FROM node:` sor image-e `node:<.node-version>-alpine` kezdetű. Legalább egy ilyen sor van. Futtatás: piros (nincs Dockerfile).
 - [ ] **Step 2:** Dockerfile, három réteg:
@@ -195,6 +197,8 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
   Az image neve kisbetűs, ezért nem a `github.repository` (`MailMCP`).
 - [ ] **Step 2:** `pnpm format:check` lokálisan zöld. A workflow valódi mérése a PR-on: `gh pr checks --watch`.
 
+> A záró review után a workflow eltér a fenti vázlattól: az actionök commit SHA-ra rögzítve (Dependabot frissíti őket), a checkout `persist-credentials: false`, a futó main build nem szakad meg, és az image neve `ghcr.io/${{ github.repository }}` (a metadata action kisbetűsít). A végleges alak a `.github/workflows/ci.yml`.
+
 ### Task 5: Dokumentáció
 
 **Files:**
@@ -203,7 +207,7 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 - [ ] **Step 1:** Állapot: 4. fázis, konténerben fut. Új „Konténer” rész: az image (`ghcr.io/csiszaralex/mailmcp`), a kötelező env változók (a „Beállítások” táblára hivatkozva, nem másolva), a `/data` kötet, az `accounts.yaml` a `/config`-ba csatolva, a CLI a konténerben (`docker compose exec mailmcp node dist/cli.js tokens list`), a healthcheck.
 - [ ] **Step 2:** Prettier a README-re.
 
-**Az app repó lezárása:** az utolsó task után záró review (fable), javítások, push, `gh pr create`, `gh pr checks --watch`, merge Alex szavára. A merge után a CI image jobja lefut: `gh run list --workflow CI --limit 1`, és az image megvan (`gh api /users/csiszaralex/packages/container/mailmcp/versions --jq '.[0].metadata.container.tags'`).
+**Az app repó lezárása:** az utolsó task után záró review (fable), javítások, push, `gh pr create`, `gh pr checks --watch`, merge Alex szavára. A merge után a CI image jobja lefut: `gh run list --workflow CI --limit 1`, és az image megvan (`docker manifest inspect ghcr.io/csiszaralex/mailmcp:latest`; a `gh api` csomag végpontjához `read:packages` jog kellene, és Git Bashben a vezető perjelet útvonalnak veszi).
 
 ### Task 6: Az infra stack
 
@@ -275,7 +279,7 @@ Az 1-3. fázis tervének Global Constraints része változatlanul érvényes (co
 
 - [ ] **Step 1:** claude.ai → Settings → Connectors → Add custom connector, címe `https://mailmcp.csalex.dev/mcp/<fiók-id>`. Bejelentkezés. Mérés a `.\scripts\Get-StackLogs.ps1 mailmcp` kimenetén: a `login_ok` `client` mezője (a pontos `client_id`), a `resource`, egy eszközhívás `ok`. Ha `authorize_rejected` jön, az oka.
 - [ ] **Step 2:** Claude Code a nyilvános címre: `claude mcp add --transport http mail-vps https://mailmcp.csalex.dev/mcp/<fiók-id>`, bejelentkezés, keresés.
-- [ ] **Step 3:** Memória: egy nagy (több MB-os) melléklet lekérése alatt `.\scripts\Get-ServerStatus.ps1` (a `mailmcp` sor) és az OOM jelző. Ha a csúcs a limit 70%-a fölött van, a `mem_limit` és a `NODE_OPTIONS` hangolása.
+- [ ] **Step 3:** Memória: egy nagy (több MB-os) melléklet lekérése alatt `.\scripts\Get-ServerStatus.ps1` (a `mailmcp` sor) és az OOM jelző. A healthcheck minden futása 33-42 MB-tal emeli a konténer memóriájának csúcsát (két mérés 2026-11-27, a cgroup `memory.peak` egy `node dist/cli.js health` előtt és után; ebben a lap cache is benne van), ezért a melléklet csúcsa plusz 42 MB legyen a limit 70%-a alatt; ha nem, a `mem_limit` és a `NODE_OPTIONS` hangolása. A `NODE_OPTIONS` a mellékletek `Buffer`-eit nem korlátozza, azok a heapen kívül vannak.
 - [ ] **Step 4:** Egy óránál hosszabb párhuzamos használatnál `refresh_reuse` sor keresése a naplóban (a refresh türelmi ablak döntéséhez).
 
 ### Task 9: A mért értékek rögzítése
