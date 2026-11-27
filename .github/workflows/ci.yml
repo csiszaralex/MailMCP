@@ -62,8 +62,8 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          # Lower case on purpose: github.repository is MailMCP, and image names must be lower case.
-          images: ghcr.io/${{ github.repository_owner }}/mailmcp
+          # ghcr.io/csiszaralex/mailmcp: the action lower-cases the image name (sanitizeImageName).
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest
