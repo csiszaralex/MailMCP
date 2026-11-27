@@ -1,5 +1,8 @@
-# D39. The Node version follows .node-version (tests/unit/dockerfile.test.ts checks it).
-FROM node:26.13.1-alpine3.24 AS base
+# D39. The one place for the base image, pinned by digest (the multi-arch index). Its Node version
+# follows .node-version; tests/unit/docker-image.test.ts checks both.
+ARG NODE_IMAGE=node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # The Node 26 image has no corepack: install the pnpm version package.json pins.
@@ -15,7 +18,7 @@ FROM base AS prod-deps
 RUN pnpm install --frozen-lockfile --ignore-scripts --prod
 
 # The runtime stage starts from the plain image, so pnpm and npm's global packages stay out.
-FROM node:26.13.1-alpine3.24
+FROM ${NODE_IMAGE}
 ENV NODE_ENV=production \
     MAILMCP_HOST=0.0.0.0 \
     MAILMCP_DATA_DIR=/data \

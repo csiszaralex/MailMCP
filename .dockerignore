@@ -1,4 +1,5 @@
-# Secrets, local data and everything the image build does not read.
+# Secrets and local data must never reach the build context; the rest is left out to keep it small.
+# Every COPY in the Dockerfile names its files, so nothing else ends up in the image.
 .env
 .env.*
 accounts.yaml
