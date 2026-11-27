@@ -67,7 +67,7 @@ Fejlesztéshez: `pnpm test` (Docker kell a GreenMail integrációs tesztekhez), 
 
 ## Konténer
 
-A CI a main ág minden commitjából image-et épít: `ghcr.io/csiszaralex/mailmcp`, `:latest` és `:sha-<commit>` címkével. Lokálisan: `docker build -t mailmcp .`
+A CI a main ág pushaiból image-et épít: `ghcr.io/csiszaralex/mailmcp`, `:latest` és `:sha-<commit>` címkével. Lokálisan: `docker build -t mailmcp .`
 
 - A beállítások ugyanazok a környezeti változók, mint lokálisan (a spec „Beállítások” táblája és a `.env.example`). Az image alapértékei: `MAILMCP_HOST=0.0.0.0`, `MAILMCP_DATA_DIR=/data`, `MAILMCP_ACCOUNTS_FILE=/config/accounts.yaml`. A `MAILMCP_PUBLIC_URL` a reverse proxy nyilvános `https://` címe, reverse proxy mögött `MAILMCP_BEHIND_PROXY=1` kell.
 - Kötetek: a `/data` named volume (a SQLite adatbázis), az `accounts.yaml` csak olvashatóan a `/config/accounts.yaml` helyre.
