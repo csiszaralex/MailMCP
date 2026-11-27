@@ -362,6 +362,22 @@ describe('AuthorizationFlow start', () => {
       ['authorize_rejected', null, 'client_id rejected', IP],
     ]);
   });
+
+  it('logs a rejected client_id only as a short https url without credentials', async () => {
+    const s = setup();
+    const longest = `https://evil.example/${'a'.repeat(512 - 'https://evil.example/'.length)}`;
+    for (const clientId of [
+      'x:anything at all <b>',
+      'http://evil.example/x',
+      'https://user:secret@evil.example/x',
+      'https://user@evil.example/x',
+      `${longest}a`,
+      longest,
+    ]) {
+      await s.flow.start(authorizeParams({ client_id: clientId }), IP);
+    }
+    expect(s.records.map((r) => r.client)).toEqual([null, null, null, null, null, longest]);
+  });
 });
 
 describe('AuthorizationFlow complete', () => {

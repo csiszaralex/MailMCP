@@ -18,6 +18,20 @@ import { normalizeResource, SUPPORTED_SCOPES } from './resources.js';
 import { type Clock, TokenGrantError, type TokenResponse, type TokenService } from './tokens.js';
 import { matchTotp } from './totp.js';
 
+/** Longer than any real client_id URL; a rejected value is logged only up to this length. */
+const MAX_LOGGED_CLIENT_ID_LENGTH = 512;
+
+/**
+ * A rejected client_id comes straight from an unauthenticated request. It is logged only when it
+ * looks like a real one: https, no user name or password, bounded length. Anything else would let
+ * a request write chosen text or a credential into the log.
+ */
+function loggableClientId(clientId: string): string | null {
+  if (clientId.length > MAX_LOGGED_CLIENT_ID_LENGTH || !URL.canParse(clientId)) return null;
+  const url = new URL(clientId);
+  return url.protocol === 'https:' && url.username === '' && url.password === '' ? clientId : null;
+}
+
 /** D31: a pending authorization request lives 10 minutes. */
 export const PENDING_REQUEST_TTL_MS = 10 * 60_000;
 /** D31: an authorization code lives 60 seconds. */
@@ -433,8 +447,7 @@ export class AuthorizationFlow {
   private rejected(clientId: string | null, ip: string, reason: string): void {
     this.deps.log({
       event: 'authorize_rejected',
-      // Only a parseable URL: the rejected value comes straight from the request.
-      client: clientId !== null && URL.canParse(clientId) ? clientId : null,
+      client: clientId === null ? null : loggableClientId(clientId),
       resource: null,
       ip,
       reason,
