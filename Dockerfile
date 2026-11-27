@@ -29,6 +29,8 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 8787
+# --timeout must stay above the probe's own 3 s deadline (realIo in src/cli.ts), so the probe
+# reports its reason instead of being killed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["node", "dist/cli.js", "health"]
 CMD ["node", "dist/main.js"]

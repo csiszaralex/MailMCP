@@ -45,7 +45,7 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-/** The log names the client by the host of its client_id URL, never by the full URL. */
+/** The short client name `tokens list` shows: the host of the client_id URL (D36). */
 export function clientHost(clientId: string): string | null {
   return URL.canParse(clientId) ? new URL(clientId).host : null;
 }

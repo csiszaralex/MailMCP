@@ -1,6 +1,11 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import {
+  createServer as createTcpServer,
+  type AddressInfo,
+  type Server as TcpServer,
+  type Socket,
+} from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -315,6 +320,43 @@ describe('health', () => {
     const h = healthIo(await serve(null));
     expect(await runCli(['health'], h.io)).toBe(1);
     expect(h.err()).toBe('health: timeout\n');
+  });
+
+  it('gives up after the deadline even while the server trickles bytes', async () => {
+    // One header byte every 20 ms: the socket is never idle, the answer never completes.
+    const timers: NodeJS.Timeout[] = [];
+    const sockets: Socket[] = [];
+    const trickler: TcpServer = createTcpServer((socket) => {
+      sockets.push(socket);
+      const bytes = Buffer.from(`HTTP/1.1 200 OK\r\nX-Slow: ${'a'.repeat(1000)}`);
+      let sent = 0;
+      const timer = setInterval(() => {
+        if (sent < bytes.length && !socket.destroyed) socket.write(bytes.subarray(sent, ++sent));
+      }, 20);
+      timers.push(timer);
+      // The probe aborts the connection at its deadline; that error is the expected end.
+      socket.on('error', () => undefined);
+    });
+    await new Promise<void>((resolve) => {
+      trickler.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const h = healthIo((trickler.address() as AddressInfo).port);
+      const started = Date.now();
+      expect(await runCli(['health'], h.io)).toBe(1);
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect(h.err()).toBe('health: timeout\n');
+    } finally {
+      for (const timer of timers) clearInterval(timer);
+      // On Windows the server side does not always see the probe's abort, and close() would
+      // wait for that socket forever.
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => {
+        trickler.close(() => {
+          resolve();
+        });
+      });
+    }
   });
 
   it('returns 1 with the configuration error', async () => {

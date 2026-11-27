@@ -132,31 +132,35 @@ function tokensRevoke(id: string, io: CliIo): number {
   });
 }
 
-/** Resolves to null on a 200, otherwise to the reason. Never rejects. */
+/**
+ * Resolves to null on a 200, otherwise to the reason. Never rejects. The deadline covers the whole
+ * exchange up to the status line, so a server that trickles bytes cannot hold the probe open.
+ */
 function probe(target: HealthTarget, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
     // node:http, not fetch: fetch does not let the Host header be set.
-    const req = request(
-      {
-        host: target.host,
-        port: target.port,
-        path: AUTHORIZATION_SERVER_METADATA_PATH,
-        headers: { Host: target.hostHeader },
-        timeout: timeoutMs,
-      },
-      (res) => {
-        res.resume();
-        resolve(res.statusCode === 200 ? null : `HTTP ${String(res.statusCode)}`);
-      },
-    );
-    req.on('timeout', () => {
-      resolve('timeout');
-      req.destroy();
+    const req = request({
+      host: target.host,
+      port: target.port,
+      path: AUTHORIZATION_SERVER_METADATA_PATH,
+      headers: { Host: target.hostHeader },
     });
-    // After a timeout, destroy() also emits an error; the promise is settled by then.
+    const deadline = setTimeout(() => {
+      settle('timeout');
+    }, timeoutMs);
+    // The first outcome wins. destroy() also closes a body that never ends, so the process can
+    // exit; the error it emits afterwards finds the promise settled.
+    function settle(reason: string | null): void {
+      clearTimeout(deadline);
+      resolve(reason);
+      req.destroy();
+    }
+    req.on('response', (res) => {
+      settle(res.statusCode === 200 ? null : `HTTP ${String(res.statusCode)}`);
+    });
     req.on('error', (err) => {
       const { code, name } = errorClass(err);
-      resolve(code ?? name);
+      settle(code ?? name);
     });
     req.end();
   });
