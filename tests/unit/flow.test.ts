@@ -354,11 +354,29 @@ describe('AuthorizationFlow start', () => {
     await s.flow.start(authorizeParams({ client_id: 'https://evil.example/x' }), IP);
     await s.flow.start(authorizeParams({ redirect_uri: 'https://evil.example/cb' }), IP);
     await s.flow.start(authorizeParams({ resource: 'https://evil.example/r' }), IP);
+    await s.flow.start(authorizeParams({ client_id: 'not a url' }), IP);
     expect(s.records.map((r) => [r.event, r.client, r.reason, r.ip])).toEqual([
-      ['authorize_rejected', 'evil.example', 'client_id rejected', IP],
-      ['authorize_rejected', 'claude.ai', 'redirect_uri rejected', IP],
-      ['authorize_rejected', 'claude.ai', 'resource unknown', IP],
+      ['authorize_rejected', 'https://evil.example/x', 'client_id rejected', IP],
+      ['authorize_rejected', CLAUDE_CODE_ID, 'redirect_uri rejected', IP],
+      ['authorize_rejected', CLAUDE_CODE_ID, 'resource unknown', IP],
+      ['authorize_rejected', null, 'client_id rejected', IP],
     ]);
+  });
+
+  it('logs a rejected client_id only as a short https url without credentials', async () => {
+    const s = setup();
+    const longest = `https://evil.example/${'a'.repeat(512 - 'https://evil.example/'.length)}`;
+    for (const clientId of [
+      'x:anything at all <b>',
+      'http://evil.example/x',
+      'https://user:secret@evil.example/x',
+      'https://user@evil.example/x',
+      `${longest}a`,
+      longest,
+    ]) {
+      await s.flow.start(authorizeParams({ client_id: clientId }), IP);
+    }
+    expect(s.records.map((r) => r.client)).toEqual([null, null, null, null, null, longest]);
   });
 });
 
@@ -375,7 +393,7 @@ describe('AuthorizationFlow complete', () => {
     expect(url.searchParams.get('iss')).toBe(ISS);
     expect(s.records.at(-1)).toEqual({
       event: 'login_ok',
-      client: 'claude.ai',
+      client: CLAUDE_CODE_ID,
       resource: RESOURCE,
       ip: IP,
       reason: null,
@@ -500,7 +518,7 @@ describe('AuthorizationFlow complete', () => {
     expect(s.records.filter((r) => r.event === 'login_failed')).toHaveLength(3);
     expect(s.records.at(-1)).toEqual({
       event: 'login_failed',
-      client: 'claude.ai',
+      client: CLAUDE_CODE_ID,
       resource: RESOURCE,
       ip: IP,
       reason: 'invalid credentials',
@@ -552,7 +570,11 @@ describe('AuthorizationFlow complete', () => {
       ip: IP,
     });
     expect(blocked).toEqual({ kind: 'blocked', retryAfterSeconds: 900 });
-    expect(s.records.at(-1)).toMatchObject({ event: 'login_blocked', ip: IP, client: 'claude.ai' });
+    expect(s.records.at(-1)).toMatchObject({
+      event: 'login_blocked',
+      ip: IP,
+      client: CLAUDE_CODE_ID,
+    });
   });
 
   it('never logs the password, the totp code or the authorization code', async () => {
@@ -653,7 +675,7 @@ describe('AuthorizationFlow redeem', () => {
     );
     expect(s.records.at(-1)).toEqual({
       event: 'code_reuse',
-      client: 'claude.ai',
+      client: CLAUDE_CODE_ID,
       resource: RESOURCE,
       ip: IP,
       reason: 'code reused',

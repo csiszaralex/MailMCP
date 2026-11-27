@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hashPassword } from '../../src/auth/password.js';
-import { isLoopbackHost, loadRuntime } from '../../src/config/runtime.js';
+import { isLoopbackHost, loadHealthTarget, loadRuntime } from '../../src/config/runtime.js';
 import { MailError } from '../../src/errors.js';
 
 const HASH = hashPassword('correct horse battery staple');
@@ -160,5 +160,42 @@ describe('isLoopbackHost', () => {
     for (const host of ['0.0.0.0', 'mail.example.com', '192.168.1.5', '']) {
       expect(isLoopbackHost(host)).toBe(false);
     }
+  });
+});
+
+describe('loadHealthTarget', () => {
+  it('connects to the default host and port and sends the public host', () => {
+    expect(loadHealthTarget({ MAILMCP_PUBLIC_URL: 'https://mail.example' })).toEqual({
+      host: '127.0.0.1',
+      port: 8787,
+      hostHeader: 'mail.example',
+    });
+  });
+
+  it('reaches a wildcard listen address through loopback', () => {
+    const base = { MAILMCP_PUBLIC_URL: 'https://mail.example', MAILMCP_PORT: '9000' };
+    expect(loadHealthTarget({ ...base, MAILMCP_HOST: '0.0.0.0' }).host).toBe('127.0.0.1');
+    expect(loadHealthTarget({ ...base, MAILMCP_HOST: '::' }).host).toBe('::1');
+    expect(loadHealthTarget({ ...base, MAILMCP_HOST: '10.0.0.5' })).toEqual({
+      host: '10.0.0.5',
+      port: 9000,
+      hostHeader: 'mail.example',
+    });
+  });
+
+  it('keeps the port of the public url in the host header', () => {
+    expect(loadHealthTarget({ MAILMCP_PUBLIC_URL: 'http://127.0.0.1:8787' }).hostHeader).toBe(
+      '127.0.0.1:8787',
+    );
+  });
+
+  it('needs no secret but rejects a bad public url or port', () => {
+    expect(() => loadHealthTarget({})).toThrow('MAILMCP_PUBLIC_URL is required.');
+    expect(() => loadHealthTarget({ MAILMCP_PUBLIC_URL: 'http://mail.example' })).toThrow(
+      'must use https',
+    );
+    expect(() =>
+      loadHealthTarget({ MAILMCP_PUBLIC_URL: 'https://mail.example', MAILMCP_PORT: 'x' }),
+    ).toThrow(MailError);
   });
 });

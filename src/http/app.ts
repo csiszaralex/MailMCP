@@ -7,18 +7,18 @@ import {
   originValidationResponse,
   requireBearerAuth,
 } from '@modelcontextprotocol/server';
-import { accountMcpPath, MCP_PATH, TOKEN_PATH } from '../auth/resources.js';
+import {
+  accountMcpPath,
+  AUTHORIZATION_SERVER_METADATA_PATH,
+  MCP_PATH,
+  PROTECTED_RESOURCE_METADATA_PREFIX,
+  TOKEN_PATH,
+} from '../auth/resources.js';
 import type { Account } from '../config/types.js';
 import { errorClass, type HttpErrorLogger } from '../log.js';
 import { OUTGOING_ATTACHMENTS_LIMIT_BYTES } from '../mail/compose.js';
 import { buildMcpServer, type ToolDeps } from '../server.js';
-import {
-  AUTHORIZATION_SERVER_METADATA_PATH,
-  PROTECTED_RESOURCE_METADATA_PREFIX,
-  registerOAuthRoutes,
-  tokenError,
-  type OAuthRouteDeps,
-} from './oauth-routes.js';
+import { registerOAuthRoutes, tokenError, type OAuthRouteDeps } from './oauth-routes.js';
 
 /**
  * Request body limit (D14): the attachments as base64 (4/3 of their bytes) plus 2 MiB for the rest of the JSON.

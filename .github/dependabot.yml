@@ -1,0 +1,8 @@
+# The workflow pins every action to a commit; this keeps those pins current. Each update is a pull
+# request that goes through CI and review like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

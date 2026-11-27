@@ -1,0 +1,19 @@
+# Secrets and local data must never reach the build context; the rest is left out to keep it small.
+# Every COPY in the Dockerfile names its files, so nothing else ends up in the image.
+.env
+.env.*
+accounts.yaml
+data
+node_modules
+dist
+coverage
+.git
+.github
+.husky
+.superpowers
+.claude
+.vscode
+.idea
+docs
+tests
+*.log

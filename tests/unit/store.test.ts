@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -220,5 +220,13 @@ describe('Store file', () => {
     db.exec('PRAGMA user_version = 2');
     db.close();
     expect(() => Store.open(path)).toThrow(/newer version/);
+  });
+
+  it('names the path when the file cannot be opened', () => {
+    // A directory where the file should be: SQLite cannot open it, as on a read-only root.
+    dir = mkdtempSync(join(tmpdir(), 'mailmcp-store-'));
+    const path = join(dir, 'mailmcp.sqlite');
+    mkdirSync(path);
+    expect(() => Store.open(path)).toThrow(`Cannot open the database ${path}: `);
   });
 });

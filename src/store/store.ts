@@ -220,8 +220,16 @@ export class Store {
 
   /** Opens (and on first use creates) the database; ':memory:' gives a private in-memory one. */
   static open(path: string): Store {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-    const db = new DatabaseSync(path);
+    let db: DatabaseSync;
+    try {
+      if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+      db = new DatabaseSync(path);
+    } catch (err) {
+      // SQLite's own message ("unable to open database file") does not say which file. The path
+      // is no secret, and it is what a missing or read-only data volume needs to show.
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      throw new Error(`Cannot open the database ${path}: ${reason}`, { cause: err });
+    }
     try {
       db.exec(`PRAGMA busy_timeout = ${String(BUSY_TIMEOUT_MS)}`);
       // An in-memory database keeps journal_mode=memory; the pragma is harmless there.

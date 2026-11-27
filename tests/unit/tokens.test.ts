@@ -95,7 +95,7 @@ describe('TokenService.issue and verifyAccessToken', () => {
 
     expect(store.listGrants()[0]).toMatchObject({ id, createdAt: START, lastUsedAt: START });
     expect(records).toEqual([
-      { event: 'token_issued', client: 'claude.ai', resource: RESOURCE, ip: IP, reason: null },
+      { event: 'token_issued', client: CLIENT_ID, resource: RESOURCE, ip: IP, reason: null },
     ]);
   });
 
@@ -157,7 +157,7 @@ describe('TokenService.refresh', () => {
     expect(records.map((r) => r.event)).toEqual(['token_issued', 'token_refreshed']);
     expect(records[1]).toEqual({
       event: 'token_refreshed',
-      client: 'claude.ai',
+      client: CLIENT_ID,
       resource: RESOURCE,
       ip: IP,
       reason: null,
@@ -180,7 +180,7 @@ describe('TokenService.refresh', () => {
     );
     expect(store.listGrants()[0]?.revokedAt).toBe(START);
     expect(records.filter((r) => r.event === 'refresh_reuse')).toEqual([
-      { event: 'refresh_reuse', client: 'claude.ai', resource: RESOURCE, ip: IP, reason: null },
+      { event: 'refresh_reuse', client: CLIENT_ID, resource: RESOURCE, ip: IP, reason: null },
     ]);
   });
 

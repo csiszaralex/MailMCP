@@ -3,6 +3,9 @@ import type { OAuthMetadata } from '@modelcontextprotocol/server';
 /** offline_access makes Claude ask for a refresh token; no other scope exists. */
 export const SUPPORTED_SCOPES = ['offline_access'] as const;
 
+export const AUTHORIZATION_SERVER_METADATA_PATH = '/.well-known/oauth-authorization-server';
+export const PROTECTED_RESOURCE_METADATA_PREFIX = '/.well-known/oauth-protected-resource';
+
 /** The MCP endpoint that reaches every account. */
 export const MCP_PATH = '/mcp';
 

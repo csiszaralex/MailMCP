@@ -7,6 +7,7 @@ import { parseDebug, parsePort } from './load.js';
 type Env = Readonly<Record<string, string | undefined>>;
 
 const MIN_TOTP_SECRET_BYTES = 10;
+const DEFAULT_HOST = '127.0.0.1';
 
 export interface RuntimeConfig {
   /** Origin only, e.g. http://127.0.0.1:8787 */
@@ -113,7 +114,7 @@ function parseTotpSecret(value: string): Buffer {
 
 export function loadRuntime(env: Env): RuntimeConfig {
   const publicUrl = parsePublicUrl(required(env, 'MAILMCP_PUBLIC_URL'));
-  const host = read(env, 'MAILMCP_HOST') ?? '127.0.0.1';
+  const host = read(env, 'MAILMCP_HOST') ?? DEFAULT_HOST;
   const port = parsePort(read(env, 'MAILMCP_PORT'));
   const dataDir = read(env, 'MAILMCP_DATA_DIR') ?? DEFAULT_DATA_DIR;
   const behindProxy = parseBehindProxy(read(env, 'MAILMCP_BEHIND_PROXY'));
@@ -128,4 +129,29 @@ export function loadRuntime(env: Env): RuntimeConfig {
   }
 
   return { publicUrl, host, port, dataDir, behindProxy, debug, passwordHash, totpSecret };
+}
+
+/** Where the healthcheck connects (D40). */
+export interface HealthTarget {
+  host: string;
+  port: number;
+  /** The Host header: the app answers only to its public host (D30). */
+  hostHeader: string;
+}
+
+/** A wildcard listen address is not a destination; the server answers on loopback too. */
+const WILDCARD_TO_LOOPBACK: ReadonlyMap<string, string> = new Map([
+  ['0.0.0.0', '127.0.0.1'],
+  ['::', '::1'],
+]);
+
+/** Reads only what the healthcheck needs, so it also runs without the secrets. */
+export function loadHealthTarget(env: Env): HealthTarget {
+  const publicUrl = parsePublicUrl(required(env, 'MAILMCP_PUBLIC_URL'));
+  const listen = read(env, 'MAILMCP_HOST') ?? DEFAULT_HOST;
+  return {
+    host: WILDCARD_TO_LOOPBACK.get(listen) ?? listen,
+    port: parsePort(read(env, 'MAILMCP_PORT')),
+    hostHeader: publicUrl.host,
+  };
 }
