@@ -5,8 +5,18 @@ ARG NODE_IMAGE=node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7e
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# The Node 26 image has no corepack: install the pnpm version package.json pins.
-RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('+')[0].split('@')[1]")"
+# The Node 26 image has no corepack: install the pnpm that package.json pins, and only after its
+# tarball matches the sha512 in packageManager ("pnpm@<version>+sha512.<hex>"). A missing or
+# different hash stops the build.
+RUN set -eu; \
+    spec="$(node -p "require('./package.json').packageManager")"; \
+    version="${spec#pnpm@}"; version="${version%%+*}"; \
+    expected="${spec##*+sha512.}"; \
+    cd /tmp; \
+    tarball="$(npm pack "pnpm@${version}" --silent)"; \
+    echo "${expected}  ${tarball}" | sha512sum -c -; \
+    npm install -g "./${tarball}"; \
+    rm "${tarball}"
 
 FROM base AS build
 RUN pnpm install --frozen-lockfile --ignore-scripts
